@@ -7,6 +7,13 @@ name = "bikey-core"
 version = "0.1.0"
 
 [[package]]
+name = "bikey-ffi"
+version = "0.1.0"
+dependencies = [
+ "bikey-core",
+]
+
+[[package]]
 name = "gen-dict"
 version = "0.1.0"
 dependencies = [

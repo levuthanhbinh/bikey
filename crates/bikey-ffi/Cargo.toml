@@ -1,0 +1,19 @@
+[package]
+name = "bikey-ffi"
+description = "C ABI over bikey-core for the macOS (Swift) and Linux (C++) input method shims"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+bikey-core = { path = "../bikey-core" }
+
+[lints]
+workspace = true

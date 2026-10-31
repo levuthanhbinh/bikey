@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/bikey-core", "tools/gen-dict"]
+members = ["crates/bikey-core", "crates/bikey-ffi", "tools/gen-dict"]
 exclude = ["fuzz"]
 
 [workspace.package]

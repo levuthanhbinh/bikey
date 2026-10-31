@@ -33,6 +33,14 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked
       - run: cargo test --workspace --locked
+      - name: C API smoke test (header matches the Rust exports)
+        if: runner.os != 'Windows'
+        run: |
+          cargo build -p bikey-ffi --locked
+          cc -std=c11 -Wall -Wextra -Werror -Icrates/bikey-ffi/include \
+            crates/bikey-ffi/tests/c/smoke.c target/debug/libbikey_ffi.a \
+            -lpthread -ldl -lm -o smoke
+          ./smoke
 
   fuzz:
     runs-on: ubuntu-latest
