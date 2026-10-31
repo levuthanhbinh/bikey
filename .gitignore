@@ -1,0 +1,11 @@
+/target/
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+*.pdb
+*.msi
+*.wixobj
+*.wixpdb
+.DS_Store
+.vscode/
+.idea/

@@ -1,0 +1,26 @@
+[workspace]
+resolver = "3"
+members = ["crates/bikey-core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/levuthanhbinh/bikey"
+authors = ["Bryan Le"]
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "unwind" # FFI entry points rely on catch_unwind
