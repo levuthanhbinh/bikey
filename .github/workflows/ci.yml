@@ -34,6 +34,21 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked
       - run: cargo test --workspace --locked
 
+  fuzz:
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: ""
+      NIGHTLY: nightly-2026-10-01
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install "$NIGHTLY" --profile minimal
+      - run: cargo +"$NIGHTLY" install cargo-fuzz --version 0.13.2 --locked
+      - name: Fuzz the engine for 5 minutes
+        working-directory: fuzz
+        run: cargo +"$NIGHTLY" fuzz run engine -- -max_total_time=300
+
   deny:
     runs-on: ubuntu-latest
     steps:

@@ -1,0 +1,23 @@
+[package]
+name = "bikey-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+bikey-core = { path = "../crates/bikey-core" }
+
+# Kept out of the main workspace: needs nightly and libFuzzer.
+[workspace]
+
+[[bin]]
+name = "engine"
+path = "fuzz_targets/engine.rs"
+test = false
+doc = false
+bench = false
