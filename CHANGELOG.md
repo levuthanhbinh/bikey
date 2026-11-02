@@ -18,7 +18,9 @@ All notable changes are documented here. The format follows
   `tools/tsf-smoke` end-to-end test.
 - Windows input-mode button near the clock: click to turn Vietnamese on or off,
   menu for Telex, VNI and tone style. Settings apply in every app from the next
-  word. V and E icons (`scripts/gen-icons.py`).
+  word.
+- Logo: E and V sharing one tile, used for the input method, the installer and
+  the README. The V and E buttons reuse its colours (`scripts/gen-icons.py`).
 - Words that are both English and Vietnamese (`car`/`cả`) follow the language of
   the previous word.
 - Code and addresses stay as typed (`obj.dir`, `dir_name`, `user@gmail.com`).

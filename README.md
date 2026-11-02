@@ -1,3 +1,5 @@
+<img src="assets/bikey-logo.svg" alt="" width="96">
+
 # bikey
 
 A Vietnamese input method (bộ gõ tiếng Việt) for Windows that recognises

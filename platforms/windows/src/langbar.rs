@@ -192,7 +192,7 @@ impl ITfLangBarItemButton_Impl for ModeButton_Impl {
     }
 
     fn GetIcon(&self) -> Result<HICON> {
-        let id: usize = if settings::enabled() { 1 } else { 2 };
+        let id: usize = if settings::enabled() { 2 } else { 3 };
         // SAFETY: loads an icon resource from this DLL. An integer id is the
         // documented form of the name; TSF owns and destroys the returned icon.
         let handle = unsafe {

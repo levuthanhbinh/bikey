@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="bikey logo: E and V sharing one tile">
+  <clipPath id="tile"><rect width="256" height="256" rx="56"/></clipPath>
+  <g clip-path="url(#tile)">
+    <rect width="256" height="256" fill="#16324F"/>
+    <path d="M256 0V256H0Z" fill="#F2A900"/>
+  </g>
+  <g fill="none" stroke-width="22" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M108 44L52 44L52 124L108 124M52 84L96 84" stroke="#FFFFFF"/>
+    <path d="M148 132L176 212L204 132" stroke="#16324F"/>
+  </g>
+</svg>
