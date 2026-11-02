@@ -15,6 +15,10 @@ recognises English as you type, so you never need to switch modes.
   no global keyboard hooks, no Accessibility permission, works on Wayland
 - No network access and no keystroke logging. See [SECURITY.md](SECURITY.md).
 
+**Use one Vietnamese typing tool at a time.** Hook-based tools such as UniKey,
+EVKey and OpenKey rewrite keystrokes system-wide, so running one alongside bikey
+scrambles text. Turn it off (or switch it to English) while bikey is selected.
+
 ## Tiếng Việt
 
 bikey là bộ gõ tiếng Việt cho Windows, macOS và Linux. Bộ gõ tự nhận ra khi bạn

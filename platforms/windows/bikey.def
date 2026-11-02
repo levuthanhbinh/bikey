@@ -1,0 +1,8 @@
+; COM entry points are exported PRIVATE: they are found with GetProcAddress
+; and must not appear in an import library.
+LIBRARY bikey
+EXPORTS
+    DllCanUnloadNow PRIVATE
+    DllGetClassObject PRIVATE
+    DllRegisterServer PRIVATE
+    DllUnregisterServer PRIVATE

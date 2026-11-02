@@ -15,7 +15,10 @@ little as possible for as short a time as possible.
   `Password`/`Sensitive` capabilities).
 - **Official OS frameworks only.** bikey uses TSF, InputMethodKit and Fcitx5.
   It never installs global keyboard hooks and never asks for Accessibility
-  permission.
+  permission. One narrow use of simulated input exists on Windows: when a key
+  bikey cannot insert itself (Enter, arrows, shortcuts) ends a word, that same
+  key is sent once more with `SendInput` so the app receives it after the word.
+  Text is never typed this way.
 - **Memory safety.** The engine is written in Rust with
   `#![forbid(unsafe_code)]`. Any `unsafe` code is confined to the FFI and
   platform crates, and each block has a `// SAFETY:` comment.
