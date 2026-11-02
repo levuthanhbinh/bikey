@@ -19,6 +19,7 @@ All notable changes are documented here. The format follows
 - Windows input-mode button near the clock: click to turn Vietnamese on or off,
   menu for Telex, VNI and tone style. Settings apply in every app from the next
   word. V and E icons (`scripts/gen-icons.py`).
+- Esc on a converted word, or right after finishing one, puts back the exact keys.
 - Windows installer (Inno Setup): fixed install folder in Program Files, never
   closes running apps, upgrades without a reboot, clean uninstall.
 - `tools/gen-dict` to find English words that Telex would turn Vietnamese.

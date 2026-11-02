@@ -179,6 +179,11 @@ impl Engine {
         self.keep_typed = false;
     }
 
+    /// The exact keys of the current word, to put them back if the user asks.
+    pub fn typed(&self) -> String {
+        self.raw.iter().collect()
+    }
+
     /// The composition string to display right now.
     pub fn preedit(&self) -> String {
         self.render(Mode::Prefix)

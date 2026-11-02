@@ -222,6 +222,18 @@ fn long_input_is_committed_in_chunks() {
 }
 
 #[test]
+fn typed_returns_the_exact_keys() {
+    let mut e = Engine::default();
+    for c in "Cos".chars() {
+        e.key(c);
+    }
+    assert_eq!(e.preedit(), "Có");
+    assert_eq!(e.typed(), "Cos");
+    e.reset();
+    assert_eq!(e.typed(), "");
+}
+
+#[test]
 fn reset_and_commit_clear_state() {
     let mut e = Engine::default();
     e.key('a');

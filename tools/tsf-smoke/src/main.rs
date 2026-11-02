@@ -49,7 +49,7 @@ mod win {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         GetFocus, HKL, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
         KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, MapVirtualKeyW, SendInput, SetFocus, VIRTUAL_KEY,
-        VK_BACK, VK_LEFT, VK_OEM_PERIOD, VK_RETURN, VK_SHIFT, VK_SPACE,
+        VK_BACK, VK_ESCAPE, VK_LEFT, VK_OEM_PERIOD, VK_RETURN, VK_SHIFT, VK_SPACE,
     };
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         INPUT_MOUSE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEINPUT,
@@ -86,6 +86,12 @@ mod win {
         ("carr ", "car "),
         ("toans\u{8} ", "tóa "),
         ("text\u{8}\u{8} ", "te "),
+        ("cos\u{1b}", "cos"),
+        ("cos\u{1b} ", "cos "),
+        ("cos \u{1b}", "cos "),
+        ("hoaf.\u{1b}", "hoaf."),
+        ("cos b\u{1b}", "có b"),
+        ("class \u{1b}", "class "),
         ("hoaf.", "hòa."),
         ("hoaf2", "hòa2"),
         ("Vieetj\n", "Việt\r\n"),
@@ -193,6 +199,7 @@ mod win {
                 ' ' => (VK_SPACE, false),
                 '\n' => (VK_RETURN, false),
                 '\u{2190}' => (VK_LEFT, false),
+                '\u{1b}' => (VK_ESCAPE, false),
                 '.' => (VK_OEM_PERIOD, false),
                 c if c.is_ascii_digit() => (VIRTUAL_KEY(u16::from(c as u8)), false),
                 c if c.is_ascii_alphabetic() => (
@@ -487,7 +494,8 @@ mod win {
                 if pass { "ok  " } else { "FAIL" },
                 keys.replace('\u{8}', "<BS>")
                     .replace('\n', "<Enter>")
-                    .replace('\u{2190}', "<Left>"),
+                    .replace('\u{2190}', "<Left>")
+                    .replace('\u{1b}', "<Esc>"),
                 got,
                 if pass {
                     String::new()

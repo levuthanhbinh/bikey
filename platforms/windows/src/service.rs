@@ -16,9 +16,9 @@ use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, GetKeyboardLayout, GetKeyboardState, INPUT, INPUT_0, INPUT_KEYBOARD,
     KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
-    SendInput, ToUnicodeEx, VIRTUAL_KEY, VK_BACK, VK_CAPITAL, VK_CONTROL, VK_LCONTROL, VK_LMENU,
-    VK_LSHIFT, VK_LWIN, VK_MENU, VK_NUMLOCK, VK_PACKET, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN,
-    VK_SCROLL, VK_SHIFT,
+    SendInput, ToUnicodeEx, VIRTUAL_KEY, VK_BACK, VK_CAPITAL, VK_CONTROL, VK_ESCAPE, VK_LCONTROL,
+    VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_NUMLOCK, VK_PACKET, VK_RCONTROL, VK_RMENU, VK_RSHIFT,
+    VK_RWIN, VK_SCROLL, VK_SHIFT,
 };
 use windows::Win32::UI::TextServices::{
     GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, ITfContext, ITfDocumentMgr, ITfKeyEventSink,
@@ -46,6 +46,8 @@ enum Action {
     /// A typed character that ends the word (space, punctuation), or a key the
     /// Vietnamese layout would mistype. Typed by bikey after the word.
     CommitWith(char),
+    /// Esc on a converted word, or right after one: put back the exact keys.
+    Restore,
     /// Any other key inside a word (Enter, arrows): finish the word, then send
     /// the key again so the app receives it afterwards.
     Commit,
@@ -60,6 +62,14 @@ struct Span {
     end: i32,
 }
 
+/// The word just finished, kept only until the next key or click so that Esc
+/// can put back what was typed.
+struct Finished {
+    word: String,
+    typed: String,
+    ended_by: char,
+}
+
 #[derive(Default)]
 struct State {
     engine: RefCell<Engine>,
@@ -67,6 +77,7 @@ struct State {
     client_id: Cell<u32>,
     /// The current word as it is on screen. Cleared when the word ends.
     shown: RefCell<String>,
+    finished: RefCell<Option<Finished>>,
     span: Cell<Option<Span>>,
     thread_sink_cookie: Cell<Option<u32>>,
     mouse_hook: Cell<Option<HHOOK>>,
@@ -301,7 +312,34 @@ impl State {
     fn forget_word(&self) {
         self.engine.borrow_mut().reset();
         self.shown.borrow_mut().clear();
+        self.finished.borrow_mut().take();
         self.span.set(None);
+    }
+
+    /// Whether Esc would change anything right now.
+    fn can_restore(&self) -> bool {
+        if self.in_word() {
+            self.engine.borrow().typed() != *self.shown.borrow()
+        } else {
+            self.finished.borrow().is_some()
+        }
+    }
+
+    /// Swap the word back to the keys that were typed. The word is over after this.
+    fn restore(&self) -> bool {
+        let inputs = if self.in_word() {
+            diff_inputs(&self.shown.borrow(), &self.engine.borrow().typed())
+        } else if let Some(f) = self.finished.borrow().as_ref() {
+            diff_inputs(
+                &format!("{}{}", f.word, f.ended_by),
+                &format!("{}{}", f.typed, f.ended_by),
+            )
+        } else {
+            return false;
+        };
+        let done = send(&inputs);
+        self.forget_word();
+        done
     }
 
     fn enabled(&self) -> bool {
@@ -345,12 +383,18 @@ impl State {
             return Action::Ignore;
         }
         self.check_caret(ctx);
+        // Any other key ends the chance to restore the word just finished.
+        if vk != VK_ESCAPE.0 {
+            self.finished.borrow_mut().take();
+        }
         let in_word = self.in_word();
         if !in_word {
             // Settings can change in any app; they apply from the next word.
             self.engine.borrow_mut().set_config(settings::config());
         }
-        let action = if vk == VK_BACK.0 {
+        let action = if vk == VK_ESCAPE.0 && self.can_restore() {
+            Action::Restore
+        } else if vk == VK_BACK.0 {
             if !in_word {
                 return Action::Ignore;
             }
@@ -426,10 +470,25 @@ impl State {
 
     /// Finish the word with its final text (English fix-ups happen here), plus `c`.
     fn commit(&self, c: Option<char>) -> bool {
-        let mut text = self.engine.borrow_mut().commit();
-        text.extend(c);
+        let typed = self.engine.borrow().typed();
+        let word = self.engine.borrow_mut().commit();
+        let text: String = word.chars().chain(c).collect();
         let done = self.type_word(&text);
+        let span = self.span.get();
         self.forget_word();
+        if let (true, Some(ended_by)) = (done && !typed.is_empty() && word != typed, c) {
+            // The caret check keeps guarding this word until the chance to restore ends.
+            let length = i32::try_from(text.encode_utf16().count()).unwrap_or(0);
+            self.span.set(span.map(|s| Span {
+                start: s.start,
+                end: s.start + length,
+            }));
+            *self.finished.borrow_mut() = Some(Finished {
+                word,
+                typed,
+                ended_by,
+            });
+        }
         done
     }
 
@@ -566,6 +625,7 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
                 Action::Word(c) => state.word_key(ctx, c),
                 Action::Backspace => state.backspace(),
                 Action::CommitWith(c) => state.commit(Some(c)),
+                Action::Restore => state.restore(),
                 Action::Commit => {
                     state.commit(None);
                     resend_key(wparam, lparam);

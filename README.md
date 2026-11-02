@@ -16,7 +16,9 @@ rights), then:
 3. Press **Win+Space** and choose **bikey**.
 
 A button near the clock shows **V** (Vietnamese) or **E** (English). Click it or
-press **Alt+Z** to switch; its menu picks Telex, VNI and tone style. Remove bikey
+press **Alt+Z** to switch; its menu picks Telex, VNI and tone style. If a word
+converts by mistake (`cos` to `có`), press **Esc** while typing it or right after
+it to get your exact keys back. Remove bikey
 from Settings → Apps. Files still in use are deleted at the next restart.
 
 The installer is not code-signed yet, so Windows may show a warning.
