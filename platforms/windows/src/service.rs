@@ -1,35 +1,38 @@
-//! The TSF text service: key handling and the composition (underlined word).
+//! The TSF text service: decides what each key means and types the result.
+//!
+//! bikey deliberately does not use TSF compositions: apps handle them too
+//! differently (some end them after every key, classic controls show a floating
+//! window). TSF is used to receive keys only in text fields while bikey is the
+//! selected input method, and to recognise password fields. Text is typed with
+//! `SendInput`: the difference between the word on screen and the new word, as
+//! Backspaces plus Unicode characters.
 
 use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
-use bikey_core::{Config, Engine, InputMethod, Output, ToneStyle};
-use windows::Win32::Foundation::{E_UNEXPECTED, LPARAM, WPARAM};
-use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
+use bikey_core::{Config, Engine, InputMethod, ToneStyle};
+use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
+use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, GetKeyboardLayout, GetKeyboardState, INPUT, INPUT_0, INPUT_KEYBOARD,
-    KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, SendInput, ToUnicodeEx, VIRTUAL_KEY,
-    VK_BACK, VK_CAPITAL, VK_CONTROL, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU,
-    VK_NUMLOCK, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT,
+    KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
+    SendInput, ToUnicodeEx, VIRTUAL_KEY, VK_BACK, VK_CAPITAL, VK_CONTROL, VK_LCONTROL, VK_LMENU,
+    VK_LSHIFT, VK_LWIN, VK_MENU, VK_NUMLOCK, VK_PACKET, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN,
+    VK_SCROLL, VK_SHIFT,
 };
 use windows::Win32::UI::TextServices::{
-    CLSID_TF_CategoryMgr, GUID_PROP_ATTRIBUTE, IEnumTfDisplayAttributeInfo, ITfCategoryMgr,
-    ITfDisplayAttributeInfo, ITfDisplayAttributeProvider, ITfDisplayAttributeProvider_Impl,
-    ITfRange,
+    GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, ITfContext, ITfDocumentMgr, ITfKeyEventSink,
+    ITfKeyEventSink_Impl, ITfKeystrokeMgr, ITfSource, ITfTextInputProcessor,
+    ITfTextInputProcessor_Impl, ITfTextInputProcessorEx, ITfTextInputProcessorEx_Impl,
+    ITfThreadMgr, ITfThreadMgrEventSink, ITfThreadMgrEventSink_Impl, TF_MOD_ALT, TF_PRESERVEDKEY,
 };
-use windows::Win32::UI::TextServices::{
-    GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, ITfComposition, ITfCompositionSink,
-    ITfCompositionSink_Impl, ITfContext, ITfContextComposition, ITfDocumentMgr,
-    ITfInsertAtSelection, ITfKeyEventSink, ITfKeyEventSink_Impl, ITfKeystrokeMgr, ITfSource,
-    ITfTextInputProcessor, ITfTextInputProcessor_Impl, ITfTextInputProcessorEx,
-    ITfTextInputProcessorEx_Impl, ITfThreadMgr, ITfThreadMgrEventSink, ITfThreadMgrEventSink_Impl,
-    TF_ANCHOR_END, TF_ES_READWRITE, TF_GRAVITY_BACKWARD, TF_GRAVITY_FORWARD, TF_IAS_QUERYONLY,
-    TF_MOD_ALT, TF_PRESERVEDKEY,
+use windows::Win32::UI::WindowsAndMessaging::{
+    CallNextHookEx, HHOOK, SetWindowsHookExW, UnhookWindowsHookEx, WH_MOUSE, WM_LBUTTONDOWN,
+    WM_MBUTTONDOWN, WM_NCLBUTTONDOWN, WM_NCMBUTTONDOWN, WM_NCRBUTTONDOWN, WM_RBUTTONDOWN,
 };
 use windows_core::{BOOL, GUID, IUnknown, IUnknownImpl, Interface, Ref, Result, implement, w};
 
-use crate::display::{AttributeEnum, GUID_ATTR_INPUT, InputAttribute};
 use crate::tsf::{self, wide};
 use crate::{DllRef, GUID_TOGGLE_KEY, guard};
 
@@ -39,15 +42,21 @@ enum Action {
     Word(char),
     /// Backspace inside the word.
     Backspace,
-    /// A typed character bikey inserts itself: one that ends a word (space,
-    /// punctuation), inserted with the word because in classic controls a committed
-    /// word reaches the app after a passed-through key; or a key the Vietnamese
-    /// layout would mistype.
+    /// A typed character that ends the word (space, punctuation), or a key the
+    /// Vietnamese layout would mistype. Typed by bikey after the word.
     CommitWith(char),
-    /// Any other key while composing: finish the word, then let the key through.
+    /// Any other key inside a word (Enter, arrows): finish the word, then send
+    /// the key again so the app receives it afterwards.
     Commit,
     /// Not ours.
     Ignore,
+}
+
+/// Where the current word is, in document offsets, when the app reports them.
+#[derive(Clone, Copy)]
+struct Span {
+    start: i32,
+    end: i32,
 }
 
 #[derive(Default)]
@@ -55,22 +64,56 @@ struct State {
     engine: RefCell<Engine>,
     thread_mgr: RefCell<Option<ITfThreadMgr>>,
     client_id: Cell<u32>,
-    /// The open composition and the context it lives in.
-    composition: RefCell<Option<(ITfContext, ITfComposition)>>,
-    /// Our own `ITfCompositionSink`, held only between Activate and Deactivate.
-    sink: RefCell<Option<ITfCompositionSink>>,
+    /// The current word as it is on screen. Cleared when the word ends.
+    shown: RefCell<String>,
+    span: Cell<Option<Span>>,
     thread_sink_cookie: Cell<Option<u32>>,
-    /// TSF atom for the "being typed" display attribute (0 = none).
-    input_atom: Cell<u32>,
+    mouse_hook: Cell<Option<HHOOK>>,
+}
+
+thread_local! {
+    /// The service on this thread, for the mouse hook callback.
+    static CURRENT: RefCell<Weak<State>> = const { RefCell::new(Weak::new()) };
+}
+
+/// A click can move the caret, and many apps do not report that through TSF, so
+/// a correction would delete the wrong text. Any mouse press ends the word.
+///
+/// This hook covers this thread only (the app's own UI thread), not the system,
+/// and reads nothing but the kind of message.
+extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if code >= 0 {
+        let press = u32::try_from(wparam.0).is_ok_and(|m| {
+            matches!(
+                m,
+                WM_LBUTTONDOWN
+                    | WM_RBUTTONDOWN
+                    | WM_MBUTTONDOWN
+                    | WM_NCLBUTTONDOWN
+                    | WM_NCRBUTTONDOWN
+                    | WM_NCMBUTTONDOWN
+            )
+        });
+        if press {
+            let _ = guard(|| {
+                CURRENT.with(|c| {
+                    if let Some(state) = c.borrow().upgrade() {
+                        state.forget_word();
+                    }
+                });
+                Ok(())
+            });
+        }
+    }
+    // SAFETY: forwarding the hook call unchanged.
+    unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
 #[implement(
     ITfTextInputProcessorEx,
     ITfTextInputProcessor,
     ITfKeyEventSink,
-    ITfCompositionSink,
-    ITfThreadMgrEventSink,
-    ITfDisplayAttributeProvider
+    ITfThreadMgrEventSink
 )]
 pub struct TextService {
     state: Rc<State>,
@@ -81,7 +124,7 @@ pub struct TextService {
 impl std::fmt::Debug for TextService {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TextService")
-            .field("composing", &self.state.composing())
+            .field("in_word", &self.state.in_word())
             .finish_non_exhaustive()
     }
 }
@@ -197,36 +240,69 @@ fn key_char(vk: u32, lparam: LPARAM) -> Option<char> {
     }
 }
 
-/// Send the key the user just pressed once more, for keys bikey cannot insert
-/// itself (Enter, arrows, shortcuts). A committed word reaches classic controls
-/// after a passed-through key, and a claimed key is not handed back, so this is
-/// the only way to keep the order. The word is already finished, so the re-sent
-/// key is classified `Ignore` and goes straight to the app. Never used for text.
-fn resend_key(wparam: WPARAM, lparam: LPARAM) {
-    let Ok(vk) = u16::try_from(wparam.0) else {
-        return;
-    };
-    let scan = u16::try_from((lparam.0 >> 16) & 0xff).unwrap_or(0);
-    let extended = (lparam.0 >> 24) & 1 == 1;
-    let input = INPUT {
+fn key_input(vk: u16, scan: u16, flags: KEYBD_EVENT_FLAGS) -> INPUT {
+    INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
                 wVk: VIRTUAL_KEY(vk),
                 wScan: scan,
-                dwFlags: if extended {
-                    KEYEVENTF_EXTENDEDKEY
-                } else {
-                    KEYBD_EVENT_FLAGS(0)
-                },
+                dwFlags: flags,
                 time: 0,
                 dwExtraInfo: 0,
             },
         },
-    };
+    }
+}
+
+fn send(inputs: &[INPUT]) -> bool {
+    if inputs.is_empty() {
+        return true;
+    }
     let size = i32::try_from(size_of::<INPUT>()).unwrap_or(0);
-    // SAFETY: one well-formed keyboard input.
-    unsafe { SendInput(&[input], size) };
+    // SAFETY: well-formed keyboard inputs.
+    let sent = unsafe { SendInput(inputs, size) };
+    sent as usize == inputs.len()
+}
+
+/// The keys that turn `old` on screen into `new`: one Backspace per character
+/// after their common start, then the rest of `new` as Unicode characters.
+/// All text is precomposed, so one Backspace removes one character.
+///
+/// Backspaces use scan code 0, which no physical key does: that is how
+/// `classify_inner` recognises them, along with `VK_PACKET`.
+fn diff_inputs(old: &str, new: &str) -> Vec<INPUT> {
+    let common = old
+        .chars()
+        .zip(new.chars())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let mut inputs = Vec::new();
+    for _ in common..old.chars().count() {
+        inputs.push(key_input(VK_BACK.0, 0, KEYBD_EVENT_FLAGS(0)));
+        inputs.push(key_input(VK_BACK.0, 0, KEYEVENTF_KEYUP));
+    }
+    let rest: String = new.chars().skip(common).collect();
+    for unit in rest.encode_utf16() {
+        inputs.push(key_input(0, unit, KEYEVENTF_UNICODE));
+        inputs.push(key_input(0, unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+    }
+    inputs
+}
+
+/// Send the key the user just pressed once more, so the app sees it after any
+/// correction to the word. The word is over by then, so bikey ignores it.
+fn resend_key(wparam: WPARAM, lparam: LPARAM) {
+    let Ok(vk) = u16::try_from(wparam.0) else {
+        return;
+    };
+    let scan = u16::try_from((lparam.0 >> 16) & 0xff).unwrap_or(0);
+    let flags = if (lparam.0 >> 24) & 1 == 1 {
+        KEYEVENTF_EXTENDEDKEY
+    } else {
+        KEYBD_EVENT_FLAGS(0)
+    };
+    send(&[key_input(vk, scan, flags)]);
 }
 
 fn is_modifier(vk: u16) -> bool {
@@ -251,8 +327,15 @@ fn is_modifier(vk: u16) -> bool {
 }
 
 impl State {
-    fn composing(&self) -> bool {
-        self.composition.borrow().is_some()
+    fn in_word(&self) -> bool {
+        self.engine.borrow().is_composing()
+    }
+
+    /// Forget the word, leaving whatever is on screen untouched.
+    fn forget_word(&self) {
+        self.engine.borrow_mut().reset();
+        self.shown.borrow_mut().clear();
+        self.span.set(None);
     }
 
     fn enabled(&self) -> bool {
@@ -262,238 +345,130 @@ impl State {
         })
     }
 
-    fn classify(&self, ctx: &ITfContext, wparam: WPARAM, lparam: LPARAM) -> Action {
-        let action = self.classify_inner(ctx, wparam, lparam);
-        trace!(
-            "classify vk={:#x} -> {}",
-            wparam.0,
-            match action {
-                Action::Word(_) => "word",
-                Action::Backspace => "backspace",
-                Action::CommitWith(_) => "commit+char",
-                Action::Commit => "commit",
-                Action::Ignore => "ignore",
-            }
-        );
-        action
+    /// If the caret has left the word (a mouse click, say), the word is over.
+    /// Correcting it now would delete the wrong text. Apps can report a caret that
+    /// lags behind typing, so only a caret outside the word's span counts.
+    fn check_caret(&self, ctx: &ITfContext) {
+        let Some(span) = self.span.get() else {
+            return;
+        };
+        let moved = tsf::caret(ctx, self.client_id.get())
+            .is_some_and(|(at, len)| len != 0 || at < span.start || at > span.end);
+        if moved {
+            self.forget_word();
+        }
     }
 
-    fn classify_inner(&self, ctx: &ITfContext, wparam: WPARAM, lparam: LPARAM) -> Action {
-        let pass = if self.composing() {
-            Action::Commit
-        } else {
-            Action::Ignore
-        };
+    fn classify(&self, ctx: &ITfContext, wparam: WPARAM, lparam: LPARAM) -> Action {
         let Ok(vk) = u16::try_from(wparam.0) else {
-            return pass;
+            return Action::Ignore;
         };
-        if is_modifier(vk) {
+        // bikey's own output comes back through here.
+        let scan = (lparam.0 >> 16) & 0xff;
+        if vk == VK_PACKET.0 || (vk == VK_BACK.0 && scan == 0) || is_modifier(vk) {
             return Action::Ignore;
         }
+        // A shortcut ends the word as it stands. No corrections: an injected
+        // Backspace would combine with the held key (Ctrl+Backspace deletes a word).
         if [VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN]
             .iter()
             .any(|k| key_down(k.0))
         {
-            return pass;
+            self.forget_word();
+            return Action::Ignore;
         }
+        self.check_caret(ctx);
+        let in_word = self.in_word();
         let action = if vk == VK_BACK.0 {
-            if self.composing() {
-                Action::Backspace
-            } else {
-                Action::Ignore
+            if !in_word {
+                return Action::Ignore;
             }
+            Action::Backspace
         } else {
             match key_char(u32::from(vk), lparam) {
                 Some(c) if self.engine.borrow().accepts(c) => Action::Word(c),
-                Some(c) if self.composing() && !c.is_control() => Action::CommitWith(c),
+                Some(c) if in_word && !c.is_control() => Action::CommitWith(c),
                 // Under the Vietnamese layout the app would type the wrong character.
                 Some(c) if vietnamese_layout() && us_key(u32::from(vk), false).is_some() => {
                     Action::CommitWith(c)
                 }
-                _ => return pass,
+                _ if in_word => Action::Commit,
+                _ => return Action::Ignore,
             }
         };
         // Only now pay for the field checks, and only for keys we would take.
-        trace!(
-            "enabled={} secure={}",
-            self.enabled(),
-            tsf::is_secure_field(ctx, self.client_id.get())
-        );
         if !self.enabled() || tsf::is_secure_field(ctx, self.client_id.get()) {
-            return pass;
+            self.forget_word();
+            return Action::Ignore;
         }
         action
     }
 
-    /// Show `out` in the document. Runs inside a read/write edit session.
-    fn apply_in_session(&self, ctx: &ITfContext, ec: u32, out: &Output) -> Result<()> {
-        if !out.commit.is_empty() {
-            self.set_text(ctx, ec, &out.commit)?;
-            self.end_composition(ec)?;
+    /// Turn the word on screen into `text`. On failure the word is forgotten and
+    /// false returned, so the key can go to the app instead.
+    fn type_word(&self, text: &str) -> bool {
+        let inputs = diff_inputs(&self.shown.borrow(), text);
+        if !send(&inputs) {
+            self.forget_word();
+            return false;
         }
-        if !out.preedit.is_empty() {
-            self.set_text(ctx, ec, &out.preedit)?;
-        } else if self.composing() {
-            self.set_text(ctx, ec, "")?;
-            self.end_composition(ec)?;
-        }
-        Ok(())
+        true
     }
 
-    /// Replace the composition text (starting a composition at the caret if
-    /// needed) and put the caret after it.
-    fn set_text(&self, ctx: &ITfContext, ec: u32, text: &str) -> Result<()> {
-        let existing = self.composition.borrow().as_ref().map(|(_, c)| c.clone());
-        let composition = if let Some(c) = existing {
-            c
-        } else {
-            let insert: ITfInsertAtSelection = ctx.cast()?;
-            let contexts: ITfContextComposition = ctx.cast()?;
-            let sink = self.sink.borrow().clone().ok_or(E_UNEXPECTED)?;
-            // SAFETY: valid edit cookie and live interfaces.
-            let c = unsafe {
-                let range = insert.InsertTextAtSelection(ec, TF_IAS_QUERYONLY, &[])?;
-                contexts.StartComposition(ec, &range, &sink)?
-            };
-            trace!("started composition");
-            *self.composition.borrow_mut() = Some((ctx.clone(), c.clone()));
-            c
+    fn word_key(&self, ctx: &ITfContext, c: char) -> bool {
+        if !self.in_word() {
+            // A selection is replaced by the first character, like normal typing.
+            let start = tsf::caret(ctx, self.client_id.get()).map(|(at, _)| at);
+            self.span.set(start.map(|start| Span { start, end: start }));
+        }
+        let Some(out) = self.engine.borrow_mut().key(c) else {
+            return false;
         };
-        // SAFETY: valid edit cookie and live interfaces.
-        unsafe {
-            let range = composition.GetRange()?;
-            // An empty range does not grow when text is inserted at its
-            // position, so let the end follow the insertion, then make the
-            // composition span exactly the new text. Otherwise TSF sees an
-            // empty composition, ends it, and the caret stays in front.
-            range.SetGravity(ec, TF_GRAVITY_BACKWARD, TF_GRAVITY_FORWARD)?;
-            range.SetText(ec, 0, &wide(text))?;
-            composition.ShiftEnd(ec, &range)?;
-            composition.ShiftStart(ec, &range)?;
-            #[cfg(feature = "trace")]
-            {
-                let mut buf = [0u16; 64];
-                let mut n = 0u32;
-                let _ = composition.GetRange()?.GetText(ec, 0, &mut buf, &raw mut n);
-                trace!(
-                    "set_text {text:?}: composition now {:?}",
-                    String::from_utf16_lossy(&buf[..n as usize])
-                );
-            }
-            self.mark_input(ctx, ec, &range);
-            let caret = range.Clone()?;
-            caret.Collapse(ec, TF_ANCHOR_END)?;
-            tsf::set_selection(ctx, ec, &caret)
-        }
+        let whole = format!("{}{}", out.commit, out.preedit);
+        self.update(&whole, &out.preedit)
     }
 
-    /// Tag `range` with the "being typed" display attribute (best effort).
-    fn mark_input(&self, ctx: &ITfContext, ec: u32, range: &ITfRange) {
-        let atom = self.input_atom.get();
-        if atom == 0 {
-            return;
-        }
-        let value = tsf::variant_i32(i32::try_from(atom).unwrap_or(0));
-        // SAFETY: valid edit cookie; `value` is a plain integer VARIANT.
-        let _ = unsafe {
-            ctx.GetProperty(&GUID_PROP_ATTRIBUTE)
-                .and_then(|p| p.SetValue(ec, range, &raw const value))
+    fn backspace(&self) -> bool {
+        let Some(out) = self.engine.borrow_mut().backspace() else {
+            return false;
         };
+        self.update(&out.preedit, &out.preedit)
     }
 
-    fn end_composition(&self, ec: u32) -> Result<()> {
-        let taken = self.composition.borrow_mut().take();
-        match taken {
-            // SAFETY: valid edit cookie; clearing our attribute is best effort.
-            Some((ctx, c)) => unsafe {
-                if let (Ok(property), Ok(range)) =
-                    (ctx.GetProperty(&GUID_PROP_ATTRIBUTE), c.GetRange())
-                {
-                    let _ = property.Clear(ec, &range);
-                }
-                c.EndComposition(ec)
-            },
-            None => Ok(()),
+    /// Type `text` over the word, leaving `word` as the word in progress.
+    fn update(&self, text: &str, word: &str) -> bool {
+        if !self.type_word(text) {
+            return false;
         }
-    }
-
-    /// Finish the current word: write its final text (English fix-ups happen
-    /// here) and end the composition.
-    fn commit(self: &Rc<Self>) {
-        let Some((ctx, _)) = self.composition.borrow().clone() else {
-            self.engine.borrow_mut().reset();
-            return;
-        };
-        let text = self.engine.borrow_mut().commit();
-        trace!("commit {text:?}");
-        let state = self.clone();
-        let ctx2 = ctx.clone();
-        let done = tsf::edit(&ctx, self.client_id.get(), TF_ES_READWRITE, move |ec| {
-            state.set_text(&ctx2, ec, &text)?;
-            state.end_composition(ec)
-        });
-        if done.is_err() {
-            // The text already on screen stays; just forget the composition.
-            self.composition.borrow_mut().take();
+        if let Some(mut span) = self.span.get() {
+            let old = i32::try_from(self.shown.borrow().encode_utf16().count()).unwrap_or(0);
+            let new = i32::try_from(text.encode_utf16().count()).unwrap_or(0);
+            span.end += new - old;
+            self.span.set(Some(span));
         }
+        word.clone_into(&mut self.shown.borrow_mut());
+        if word.is_empty() {
+            self.span.set(None);
+        }
+        true
     }
 
-    /// Finish the word with `c` appended. Returns false if that failed, in
-    /// which case the word stays on screen and the key should pass through.
-    fn commit_with(self: &Rc<Self>, current: &ITfContext, c: char) -> bool {
-        let existing = self
-            .composition
-            .borrow()
-            .as_ref()
-            .map(|(ctx, _)| ctx.clone());
-        let ctx = existing.unwrap_or_else(|| current.clone());
+    /// Finish the word with its final text (English fix-ups happen here), plus `c`.
+    fn commit(&self, c: Option<char>) -> bool {
         let mut text = self.engine.borrow_mut().commit();
-        text.push(c);
-        trace!("commit+char {text:?}");
-        let state = self.clone();
-        let ctx2 = ctx.clone();
-        let done = tsf::edit(&ctx, self.client_id.get(), TF_ES_READWRITE, move |ec| {
-            state.set_text(&ctx2, ec, &text)?;
-            state.end_composition(ec)
-        });
-        if done.is_err() {
-            self.composition.borrow_mut().take();
-        }
-        done.is_ok()
-    }
-
-    /// Feed `out` to the document; on failure drop the word so the key can pass through.
-    fn apply(self: &Rc<Self>, ctx: &ITfContext, out: Output) -> bool {
-        let state = self.clone();
-        let ctx2 = ctx.clone();
-        let done = tsf::edit(ctx, self.client_id.get(), TF_ES_READWRITE, move |ec| {
-            state.apply_in_session(&ctx2, ec, &out)
-        });
-        trace!("apply -> {done:?}");
-        if done.is_err() {
-            self.engine.borrow_mut().reset();
-            self.composition.borrow_mut().take();
-        }
-        done.is_ok()
+        text.extend(c);
+        let done = self.type_word(&text);
+        self.forget_word();
+        done
     }
 
     fn deactivate(&self) {
-        if let Some((ctx, _)) = self.composition.borrow().clone() {
-            let text = self.engine.borrow_mut().commit();
-            let composition = self.composition.borrow_mut().take();
-            let _ = tsf::edit(&ctx, self.client_id.get(), TF_ES_READWRITE, move |ec| {
-                if let Some((_, c)) = composition {
-                    // SAFETY: valid edit cookie.
-                    unsafe {
-                        c.GetRange()?.SetText(ec, 0, &wide(&text))?;
-                        c.EndComposition(ec)?;
-                    }
-                }
-                Ok(())
-            });
+        self.forget_word();
+        if let Some(hook) = self.mouse_hook.take() {
+            // SAFETY: installed in ActivateEx on this thread.
+            let _ = unsafe { UnhookWindowsHookEx(hook) };
         }
-        self.engine.borrow_mut().reset();
-        self.composition.borrow_mut().take();
+        CURRENT.with(|c| *c.borrow_mut() = Weak::new());
         let tm = self.thread_mgr.borrow_mut().take();
         if let Some(tm) = tm {
             let id = self.client_id.get();
@@ -512,8 +487,6 @@ impl State {
                 let _ = unsafe { source.UnadviseSink(cookie) };
             }
         }
-        // Breaks the self-reference taken in Activate.
-        self.sink.borrow_mut().take();
         self.client_id.set(0);
     }
 }
@@ -546,7 +519,12 @@ impl ITfTextInputProcessorEx_Impl for TextService_Impl {
             state.client_id.set(tid);
             *state.thread_mgr.borrow_mut() = Some(tm.clone());
             state.engine.borrow_mut().set_config(load_config());
-            *state.sink.borrow_mut() = Some(self.to_interface::<ITfCompositionSink>());
+            CURRENT.with(|c| *c.borrow_mut() = Rc::downgrade(state));
+            // SAFETY: a hook for this thread only, removed in `deactivate`.
+            let hook = unsafe {
+                SetWindowsHookExW(WH_MOUSE, Some(mouse_proc), None, GetCurrentThreadId())
+            }?;
+            state.mouse_hook.set(Some(hook));
 
             let keys: ITfKeystrokeMgr = tm.cast()?;
             let key_sink: ITfKeyEventSink = self.to_interface();
@@ -566,16 +544,6 @@ impl ITfTextInputProcessorEx_Impl for TextService_Impl {
             // SAFETY: plain COM call with live interfaces.
             let cookie = unsafe { source.AdviseSink(&ITfThreadMgrEventSink::IID, &thread_sink)? };
             state.thread_sink_cookie.set(Some(cookie));
-            // SAFETY: plain COM calls; without the atom words just aren't underlined.
-            let atom = unsafe {
-                CoCreateInstance::<_, ITfCategoryMgr>(
-                    &CLSID_TF_CategoryMgr,
-                    None,
-                    CLSCTX_INPROC_SERVER,
-                )
-                .and_then(|m| m.RegisterGUID(&GUID_ATTR_INPUT))
-            };
-            state.input_atom.set(atom.unwrap_or(0));
             // Vietnamese on when bikey is selected.
             tsf::set_compartment_i32(&tm, &GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, tid, 1)?;
             Ok(())
@@ -598,14 +566,8 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
     fn OnTestKeyDown(&self, pic: Ref<ITfContext>, wparam: WPARAM, lparam: LPARAM) -> Result<BOOL> {
         guard(|| {
             let ctx = pic.ok()?;
-            Ok(match self.state.classify(ctx, wparam, lparam) {
-                // `Commit` is claimed too: OnKeyDown finishes the word, then sends
-                // the key again so the app sees it after the word.
-                Action::Word(_) | Action::Backspace | Action::CommitWith(_) | Action::Commit => {
-                    true.into()
-                }
-                Action::Ignore => false.into(),
-            })
+            let ours = !matches!(self.state.classify(ctx, wparam, lparam), Action::Ignore);
+            Ok(ours.into())
         })
     }
 
@@ -614,17 +576,11 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
             let ctx = pic.ok()?;
             let state = &self.state;
             let eaten = match state.classify(ctx, wparam, lparam) {
-                Action::Word(c) => {
-                    let out = state.engine.borrow_mut().key(c);
-                    out.is_some_and(|out| state.apply(ctx, out))
-                }
-                Action::Backspace => {
-                    let out = state.engine.borrow_mut().backspace();
-                    out.is_some_and(|out| state.apply(ctx, out))
-                }
-                Action::CommitWith(c) => state.commit_with(ctx, c),
+                Action::Word(c) => state.word_key(ctx, c),
+                Action::Backspace => state.backspace(),
+                Action::CommitWith(c) => state.commit(Some(c)),
                 Action::Commit => {
-                    state.commit();
+                    state.commit(None);
                     resend_key(wparam, lparam);
                     true
                 }
@@ -649,7 +605,7 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
                 return Ok(false.into());
             }
             let state = &self.state;
-            state.commit();
+            state.forget_word();
             let tm = state.thread_mgr.borrow().clone();
             if let Some(tm) = tm {
                 let on = state.enabled();
@@ -661,24 +617,6 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
                 )?;
             }
             Ok(true.into())
-        })
-    }
-}
-
-impl ITfCompositionSink_Impl for TextService_Impl {
-    fn OnCompositionTerminated(&self, ec: u32, composition: Ref<ITfComposition>) -> Result<()> {
-        guard(|| {
-            // The app ended the word (e.g. a click elsewhere): apply the final
-            // text with the cookie we were given, then forget the word.
-            let state = &self.state;
-            let text = state.engine.borrow_mut().commit();
-            trace!("composition terminated by app; final {text:?}");
-            if let Ok(c) = composition.ok() {
-                // SAFETY: `ec` is the write cookie TSF passed for this callback.
-                let _ = unsafe { c.GetRange().and_then(|r| r.SetText(ec, 0, &wide(&text))) };
-            }
-            state.composition.borrow_mut().take();
-            Ok(())
         })
     }
 }
@@ -697,10 +635,9 @@ impl ITfThreadMgrEventSink_Impl for TextService_Impl {
         _focus: Ref<ITfDocumentMgr>,
         _previous: Ref<ITfDocumentMgr>,
     ) -> Result<()> {
-        // Focus moved to another field: finish the word where it was typed.
-        trace!("document focus changed");
+        // Focus moved to another field: the word stays where it was typed.
         guard(|| {
-            self.state.commit();
+            self.state.forget_word();
             Ok(())
         })
     }
@@ -711,20 +648,5 @@ impl ITfThreadMgrEventSink_Impl for TextService_Impl {
 
     fn OnPopContext(&self, _pic: Ref<ITfContext>) -> Result<()> {
         Ok(())
-    }
-}
-
-impl ITfDisplayAttributeProvider_Impl for TextService_Impl {
-    fn EnumDisplayAttributeInfo(&self) -> Result<IEnumTfDisplayAttributeInfo> {
-        Ok(AttributeEnum::default().into())
-    }
-
-    fn GetDisplayAttributeInfo(&self, guid: *const GUID) -> Result<ITfDisplayAttributeInfo> {
-        // SAFETY: checked for null; TSF passes a valid GUID.
-        if !guid.is_null() && unsafe { *guid } == GUID_ATTR_INPUT {
-            Ok(InputAttribute.into())
-        } else {
-            Err(windows::Win32::Foundation::E_INVALIDARG.into())
-        }
     }
 }

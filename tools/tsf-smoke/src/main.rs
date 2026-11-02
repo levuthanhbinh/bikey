@@ -35,17 +35,22 @@ mod win {
     use std::time::{Duration, Instant};
 
     use bikey::{CLSID_BIKEY, PROFILE_BIKEY};
-    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
+    use windows::Win32::Graphics::Gdi::ClientToScreen;
     use windows::Win32::System::Com::{
         CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
     };
     use windows::Win32::System::LibraryLoader::{GetModuleHandleW, LoadLibraryW};
-    use windows::Win32::UI::Controls::EM_GETSEL;
+    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
     use windows::Win32::UI::Controls::RichEdit::{EM_SETEDITSTYLE, SES_USECTF};
+    use windows::Win32::UI::Controls::{EM_GETSEL, EM_SETSEL};
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         GetFocus, HKL, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
-        KEYEVENTF_KEYUP, SendInput, SetFocus, VIRTUAL_KEY, VK_BACK, VK_LEFT, VK_OEM_PERIOD,
-        VK_RETURN, VK_SHIFT, VK_SPACE,
+        KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, MapVirtualKeyW, SendInput, SetFocus, VIRTUAL_KEY,
+        VK_BACK, VK_LEFT, VK_OEM_PERIOD, VK_RETURN, VK_SHIFT, VK_SPACE,
+    };
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        INPUT_MOUSE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEINPUT,
     };
     use windows::Win32::UI::TextServices::{
         CLSID_TF_InputProcessorProfiles, GUID_TFCAT_TIP_KEYBOARD, ITfInputProcessorProfileMgr,
@@ -58,6 +63,7 @@ mod win {
         TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASSW, WS_CHILD, WS_OVERLAPPEDWINDOW,
         WS_VISIBLE,
     };
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowThreadProcessId, SetCursorPos};
     use windows_core::{PCWSTR, w};
 
     type Result<T> = std::result::Result<T, String>;
@@ -72,6 +78,7 @@ mod win {
         ("nguwowif ", "người "),
         ("dduwowcj ", "được "),
         ("class ", "class "),
+        ("new ", "new "),
         ("these ", "these "),
         ("yes ", "yes "),
         ("carr ", "car "),
@@ -156,7 +163,11 @@ mod win {
             Anonymous: INPUT_0 {
                 ki: KEYBDINPUT {
                     wVk: vk,
-                    wScan: 0,
+                    // SAFETY: trivial Win32 call. Physical keys carry a scan code.
+                    wScan: u16::try_from(unsafe {
+                        MapVirtualKeyW(u32::from(vk.0), MAPVK_VK_TO_VSC)
+                    })
+                    .unwrap_or(0),
                     dwFlags: if up {
                         KEYEVENTF_KEYUP
                     } else {
@@ -204,6 +215,51 @@ mod win {
             trace(edit, c);
         }
         Ok(())
+    }
+
+    /// Click at the top-left of `edit`, moving the caret to the start of the text.
+    fn click_start_of(window: HWND, edit: HWND) -> Result<()> {
+        // SAFETY: trivial Win32 calls; the point is inside our own control.
+        unsafe {
+            if GetForegroundWindow() != window {
+                return Err("test window lost focus, stopped".into());
+            }
+            let mut point = POINT { x: 1, y: 4 };
+            let _ = ClientToScreen(edit, &raw mut point);
+            SetCursorPos(point.x, point.y).map_err(|e| e.to_string())?;
+            let press = |flags| INPUT {
+                r#type: INPUT_MOUSE,
+                Anonymous: INPUT_0 {
+                    mi: MOUSEINPUT {
+                        dwFlags: flags,
+                        ..Default::default()
+                    },
+                },
+            };
+            let size = i32::try_from(size_of::<INPUT>()).expect("small struct");
+            SendInput(
+                &[press(MOUSEEVENTF_LEFTDOWN), press(MOUSEEVENTF_LEFTUP)],
+                size,
+            );
+        }
+        Ok(())
+    }
+
+    /// Windows only lets the app the user is in hand over the foreground, which
+    /// this tool is not when started from a script. Sharing input state with that
+    /// app for one call lifts the restriction.
+    fn bring_to_front(window: HWND) {
+        // SAFETY: trivial Win32 calls on valid handles, attached only for this call.
+        unsafe {
+            let ours = GetCurrentThreadId();
+            let theirs = GetWindowThreadProcessId(GetForegroundWindow(), None);
+            let attached =
+                theirs != 0 && theirs != ours && AttachThreadInput(ours, theirs, true).as_bool();
+            let _ = SetForegroundWindow(window);
+            if attached {
+                let _ = AttachThreadInput(ours, theirs, false);
+            }
+        }
     }
 
     fn create_windows(control: &str) -> windows_core::Result<(HWND, HWND)> {
@@ -313,11 +369,9 @@ mod win {
             .map_err(|e| e.to_string())?;
         let (window, edit) = create_windows(&control).map_err(|e| e.to_string())?;
         activate_bikey()?;
-        // SAFETY: our own windows.
-        unsafe {
-            let _ = SetForegroundWindow(window);
-            let _ = SetFocus(Some(edit));
-        }
+        bring_to_front(window);
+        // SAFETY: our own control.
+        let _ = unsafe { SetFocus(Some(edit)) };
         pump(Duration::from_millis(300));
         // SAFETY: trivial Win32 calls.
         let in_front = unsafe { GetForegroundWindow() == window && GetFocus() == edit };
@@ -337,13 +391,17 @@ mod win {
             "vni" => VNI_CASES,
             _ => CASES,
         };
-        for (keys, want) in cases {
+        for (index, (keys, want)) in cases.iter().enumerate() {
             // SAFETY: our own control.
             let _ = unsafe { SetWindowTextW(edit, w!("")) };
             pump(Duration::from_millis(50));
             type_keys(window, edit, keys)?;
             pump(Duration::from_millis(100));
             let got = text(edit);
+            // Raw keys back on the first case: bikey was not converting at all.
+            if control != "password" && index == 0 && got == *keys {
+                return Err("bikey was not processing keys".into());
+            }
             let pass = got == *want;
             ok &= pass;
             println!(
@@ -359,6 +417,54 @@ mod win {
                     format!(" (want {want:?})")
                 }
             );
+        }
+        if control != "password" {
+            // Typing over selected text must replace it (the Explorer rename box).
+            // SAFETY: our own control.
+            unsafe {
+                let _ = SetWindowTextW(edit, w!("old name"));
+                SendMessageW(edit, EM_SETSEL, Some(WPARAM(0)), Some(LPARAM(-1)));
+            }
+            pump(Duration::from_millis(50));
+            type_keys(
+                window,
+                edit,
+                if control == "vni" {
+                    "tie6ng1 "
+                } else {
+                    "tieengs "
+                },
+            )?;
+            pump(Duration::from_millis(100));
+            let got = text(edit);
+            let pass = got == "tiếng ";
+            ok &= pass;
+            println!(
+                "{} over selection -> {got:?}",
+                if pass { "ok  " } else { "FAIL" }
+            );
+
+            // A real click mid-word must not delete anything: the next key starts
+            // a new word at the new position. The click lands inside our own
+            // control, at the far left so the caret goes to the start.
+            if control != "vni" {
+                // SAFETY: our own control.
+                let _ = unsafe { SetWindowTextW(edit, w!("")) };
+                pump(Duration::from_millis(50));
+                type_keys(window, edit, "ddi")?;
+                click_start_of(window, edit)?;
+                pump(Duration::from_millis(100));
+                type_keys(window, edit, "b ")?;
+                pump(Duration::from_millis(100));
+                let got = text(edit);
+                let pass = got == "b đi";
+                ok &= pass;
+                println!(
+                    "{} caret moved mid-word -> {got:?}{}",
+                    if pass { "ok  " } else { "FAIL" },
+                    if pass { "" } else { " (want \"b đi\")" }
+                );
+            }
         }
         // SAFETY: our own window.
         let _ = unsafe { DestroyWindow(window) };

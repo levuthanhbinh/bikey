@@ -44,7 +44,6 @@ fn telex_vietnamese() {
         ("ddi", "đi"),
         ("dd", "đ"),
         ("muwa", "mưa"),
-        ("mwa", "mưa"), // lone w types ư
         ("trawng", "trăng"),
         ("thuowr", "thuở"),
         ("hoawcj", "hoặc"),
@@ -58,6 +57,19 @@ fn telex_vietnamese() {
     for (keys, want) in cases {
         assert_eq!(telex(keys), want, "telex {keys}");
     }
+}
+
+#[test]
+fn w_alone_is_never_u_horn() {
+    for word in ["w", "W", "mwa", "wa", "tw", "ww", "new"] {
+        assert_eq!(telex(word), word, "telex {word}");
+    }
+    // It still marks a vowel.
+    assert_eq!(telex("muwa"), "mưa");
+    assert_eq!(telex("trawng"), "trăng");
+    assert_eq!(telex("sawps"), "sắp");
+    assert_eq!(telex("Sawps"), "Sắp");
+    assert_eq!(telex("sapws"), "sắp"); // the mark can come after the final
 }
 
 #[test]

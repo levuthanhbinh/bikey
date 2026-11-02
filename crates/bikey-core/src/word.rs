@@ -67,7 +67,7 @@ impl Word {
                 'j' => self.tone_key(Tone::Dot, key),
                 'z' => self.clear_tone(key),
                 'a' | 'e' | 'o' => self.circumflex(&[k], key),
-                'w' => self.horn(&['a', 'o', 'u'], true, key),
+                'w' => self.horn(&['a', 'o', 'u'], key),
                 'd' => self.stroke(key),
                 _ => self.push(key),
             },
@@ -79,8 +79,8 @@ impl Word {
                 '5' => self.tone_key(Tone::Dot, key),
                 '0' => self.clear_tone(key),
                 '6' => self.circumflex(&['a', 'e', 'o'], key),
-                '7' => self.horn(&['o', 'u'], false, key),
-                '8' => self.horn(&['a'], false, key),
+                '7' => self.horn(&['o', 'u'], key),
+                '8' => self.horn(&['a'], key),
                 '9' => self.stroke(key),
                 _ => self.push(key),
             },
@@ -175,8 +175,9 @@ impl Word {
     }
 
     /// Horn on `o`/`u`, breve on `a`. A `uo` pair becomes `ươ` when letters
-    /// follow and `uơ` at the end (`thuở`). In Telex a lone `w` types `ư`.
-    fn horn(&mut self, bases: &[char], standalone: bool, key: char) {
+    /// follow and `uơ` at the end (`thuở`). With no vowel to mark the key is just
+    /// a letter: a lone `w` stays `w`, never `ư`.
+    fn horn(&mut self, bases: &[char], key: char) {
         let nucleus = syllable::parse(&self.letters).nucleus;
         if bases.contains(&'o') {
             let pair = nucleus.clone().find(|&i| {
@@ -202,11 +203,6 @@ impl Word {
                 };
                 self.toggle(&[i], mark, key);
             }
-            None if standalone => self.letters.push(Letter {
-                base: 'u',
-                mark: Mark::Horn,
-                upper: key.is_ascii_uppercase(),
-            }),
             None => self.push(key),
         }
     }

@@ -1,7 +1,8 @@
 //! Small safe wrappers around the raw TSF calls the service needs.
 
 use core::mem::ManuallyDrop;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::System::Variant::{
@@ -11,8 +12,8 @@ use windows::Win32::UI::TextServices::{
     GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED, GUID_PROP_INPUTSCOPE,
     IS_ALPHANUMERIC_PIN, IS_ALPHANUMERIC_PIN_SET, IS_NUMERIC_PASSWORD, IS_NUMERIC_PIN, IS_PASSWORD,
     ITfCompartmentMgr, ITfContext, ITfEditSession, ITfEditSession_Impl, ITfInputScope, ITfRange,
-    InputScope, TF_AE_NONE, TF_CONTEXT_EDIT_CONTEXT_FLAGS, TF_DEFAULT_SELECTION, TF_ES_READ,
-    TF_ES_SYNC, TF_SELECTION, TF_SELECTIONSTYLE,
+    ITfRangeACP, InputScope, TF_CONTEXT_EDIT_CONTEXT_FLAGS, TF_DEFAULT_SELECTION, TF_ES_READ,
+    TF_ES_SYNC, TF_SELECTION,
 };
 use windows_core::{GUID, Interface, Result, implement};
 
@@ -101,7 +102,7 @@ pub fn is_secure_field(ctx: &ITfContext, client_id: u32) -> bool {
     if flag(&GUID_COMPARTMENT_KEYBOARD_DISABLED) || flag(&GUID_COMPARTMENT_EMPTYCONTEXT) {
         return true;
     }
-    let result = std::rc::Rc::new(std::cell::Cell::new(false));
+    let result = Rc::new(Cell::new(false));
     let out = result.clone();
     let ctx2 = ctx.clone();
     let read = edit(ctx, client_id, TF_ES_READ, move |ec| {
@@ -175,17 +176,21 @@ pub fn selection(ctx: &ITfContext, ec: u32) -> Result<Option<ITfRange>> {
     Ok(ManuallyDrop::into_inner(range))
 }
 
-/// Put the caret at `range` (collapsed by the caller as needed).
-pub fn set_selection(ctx: &ITfContext, ec: u32, range: &ITfRange) -> Result<()> {
-    let sel = TF_SELECTION {
-        range: ManuallyDrop::new(Some(range.clone())),
-        style: TF_SELECTIONSTYLE {
-            ase: TF_AE_NONE,
-            fInterimChar: false.into(),
-        },
-    };
-    // SAFETY: valid edit cookie; `sel` is a well-formed selection.
-    let result = unsafe { ctx.SetSelection(ec, core::slice::from_ref(&sel)) };
-    drop(ManuallyDrop::into_inner(sel.range));
-    result
+/// The selection as document offsets (start, length), if the app reports them.
+pub fn caret(ctx: &ITfContext, client_id: u32) -> Option<(i32, i32)> {
+    let result = Rc::new(Cell::new(None));
+    let out = result.clone();
+    let ctx2 = ctx.clone();
+    edit(ctx, client_id, TF_ES_READ, move |ec| {
+        if let Some(range) = selection(&ctx2, ec)? {
+            let range: ITfRangeACP = range.cast()?;
+            let (mut start, mut len) = (0i32, 0i32);
+            // SAFETY: valid out pointers on a live range.
+            unsafe { range.GetExtent(&raw mut start, &raw mut len)? };
+            out.set(Some((start, len)));
+        }
+        Ok(())
+    })
+    .ok()?;
+    result.get()
 }

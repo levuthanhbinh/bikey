@@ -15,10 +15,13 @@ little as possible for as short a time as possible.
   `Password`/`Sensitive` capabilities).
 - **Official OS frameworks only.** bikey uses TSF, InputMethodKit and Fcitx5.
   It never installs global keyboard hooks and never asks for Accessibility
-  permission. One narrow use of simulated input exists on Windows: when a key
-  bikey cannot insert itself (Enter, arrows, shortcuts) ends a word, that same
-  key is sent once more with `SendInput` so the app receives it after the word.
-  Text is never typed this way.
+  permission. On Windows a mouse hook limited to the app's own UI thread ends the
+  current word on a click; it reads only that a button was pressed.
+- **Simulated input on Windows.** Apps handle TSF compositions too differently,
+  so bikey types with `SendInput`: Backspaces and Unicode characters for the
+  current word, and the key you pressed sent again when it ends a word. It only
+  receives keys through TSF, while selected as the input method in a text field
+  that is not marked secure, and it sends nothing else.
 - **Memory safety.** The engine is written in Rust with
   `#![forbid(unsafe_code)]`. Any `unsafe` code is confined to the FFI and
   platform crates, and each block has a `// SAFETY:` comment.

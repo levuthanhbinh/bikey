@@ -16,8 +16,8 @@ use windows::Win32::System::Registry::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::HKL;
 use windows::Win32::UI::TextServices::{
-    CLSID_TF_CategoryMgr, CLSID_TF_InputProcessorProfiles, GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,
-    GUID_TFCAT_TIP_KEYBOARD, GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT, GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT,
+    CLSID_TF_CategoryMgr, CLSID_TF_InputProcessorProfiles, GUID_TFCAT_TIP_KEYBOARD,
+    GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT, GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT,
     GUID_TFCAT_TIPCAP_UIELEMENTENABLED, ITfCategoryMgr, ITfInputProcessorProfileMgr,
 };
 use windows_core::{GUID, HSTRING, PCWSTR, Result};
@@ -30,13 +30,11 @@ const LANG_VI_VN: u16 = 0x042A;
 /// Keyboard layout handle: US keys (high word) under Vietnamese (low word).
 const LAYOUT_US: usize = 0x0409_042A;
 
-/// Keyboard text service with display attributes, works in Store/immersive
-/// apps and the system tray, and has no UI of its own (so it is fine in
-/// UI-less mode). Deliberately not `SECUREMODE`: bikey is not loaded on the
-/// secure desktop (UAC, sign-in).
-const CATEGORIES: [GUID; 5] = [
+/// Keyboard text service, works in Store/immersive apps and the system tray,
+/// and has no UI of its own (so it is fine in UI-less mode). Deliberately not
+/// `SECUREMODE`: bikey is not loaded on the secure desktop (UAC, sign-in).
+const CATEGORIES: [GUID; 4] = [
     GUID_TFCAT_TIP_KEYBOARD,
-    GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,
     GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT,
     GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT,
     GUID_TFCAT_TIPCAP_UIELEMENTENABLED,

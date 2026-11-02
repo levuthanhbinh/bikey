@@ -27,16 +27,13 @@ features = [
     "Win32_System_Ole",
     "Win32_System_Registry",
     "Win32_System_SystemServices",
+    "Win32_System_Threading",
     "Win32_Security",
     "Win32_System_Variant",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_TextServices",
+    "Win32_UI_WindowsAndMessaging",
 ]
-
-[features]
-# Development only: print internal events to stderr. Never enable for
-# release builds (the shipped DLL must not log anything).
-trace = []
 
 [lints]
 workspace = true
