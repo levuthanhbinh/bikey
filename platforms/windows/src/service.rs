@@ -10,9 +10,8 @@
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
-use bikey_core::{Config, Engine, InputMethod, ToneStyle};
+use bikey_core::Engine;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
-use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, GetKeyboardLayout, GetKeyboardState, INPUT, INPUT_0, INPUT_KEYBOARD,
@@ -27,14 +26,16 @@ use windows::Win32::UI::TextServices::{
     ITfTextInputProcessor_Impl, ITfTextInputProcessorEx, ITfTextInputProcessorEx_Impl,
     ITfThreadMgr, ITfThreadMgrEventSink, ITfThreadMgrEventSink_Impl, TF_MOD_ALT, TF_PRESERVEDKEY,
 };
+use windows::Win32::UI::TextServices::{ITfLangBarItemButton, ITfLangBarItemMgr};
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, HHOOK, SetWindowsHookExW, UnhookWindowsHookEx, WH_MOUSE, WM_LBUTTONDOWN,
     WM_MBUTTONDOWN, WM_NCLBUTTONDOWN, WM_NCMBUTTONDOWN, WM_NCRBUTTONDOWN, WM_RBUTTONDOWN,
 };
-use windows_core::{BOOL, GUID, IUnknown, IUnknownImpl, Interface, Ref, Result, implement, w};
+use windows_core::{BOOL, GUID, IUnknown, IUnknownImpl, Interface, Ref, Result, implement};
 
+use crate::langbar::{self, ModeButton};
 use crate::tsf::{self, wide};
-use crate::{DllRef, GUID_TOGGLE_KEY, guard};
+use crate::{DllRef, GUID_TOGGLE_KEY, guard, settings};
 
 /// What a key press means for the current word.
 enum Action {
@@ -69,6 +70,7 @@ struct State {
     span: Cell<Option<Span>>,
     thread_sink_cookie: Cell<Option<u32>>,
     mouse_hook: Cell<Option<HHOOK>>,
+    button: RefCell<Option<ITfLangBarItemButton>>,
 }
 
 thread_local! {
@@ -137,42 +139,6 @@ impl TextService {
         }
         .into()
     }
-}
-
-/// Settings from `HKCU\Software\bikey` (DWORDs `Method`, `ToneStyle`,
-/// `AutoEnglish`). Missing or unreadable values (e.g. in sandboxed apps) keep
-/// the defaults.
-fn load_config() -> Config {
-    let read = |name: windows_core::PCWSTR| -> Option<u32> {
-        let mut value = 0u32;
-        let mut size = u32::try_from(size_of::<u32>()).ok()?;
-        // SAFETY: `value`/`size` describe a valid 4-byte buffer.
-        unsafe {
-            RegGetValueW(
-                HKEY_CURRENT_USER,
-                w!("Software\\bikey"),
-                name,
-                RRF_RT_REG_DWORD,
-                None,
-                Some((&raw mut value).cast()),
-                Some(&raw mut size),
-            )
-        }
-        .ok()
-        .ok()?;
-        Some(value)
-    };
-    let mut config = Config::default();
-    if read(w!("Method")) == Some(1) {
-        config.method = InputMethod::Vni;
-    }
-    if read(w!("ToneStyle")) == Some(1) {
-        config.tone_style = ToneStyle::Modern;
-    }
-    if read(w!("AutoEnglish")) == Some(0) {
-        config.auto_english = false;
-    }
-    config
 }
 
 fn key_down(vk: u16) -> bool {
@@ -340,9 +306,10 @@ impl State {
 
     fn enabled(&self) -> bool {
         let tm = self.thread_mgr.borrow();
-        tm.as_ref().is_some_and(|tm| {
-            tsf::compartment_i32(tm, &GUID_COMPARTMENT_KEYBOARD_OPENCLOSE) != Some(0)
-        })
+        settings::enabled()
+            && tm.as_ref().is_some_and(|tm| {
+                tsf::compartment_i32(tm, &GUID_COMPARTMENT_KEYBOARD_OPENCLOSE) != Some(0)
+            })
     }
 
     /// If the caret has left the word (a mouse click, say), the word is over.
@@ -379,6 +346,10 @@ impl State {
         }
         self.check_caret(ctx);
         let in_word = self.in_word();
+        if !in_word {
+            // Settings can change in any app; they apply from the next word.
+            self.engine.borrow_mut().set_config(settings::config());
+        }
         let action = if vk == VK_BACK.0 {
             if !in_word {
                 return Action::Ignore;
@@ -470,8 +441,13 @@ impl State {
         }
         CURRENT.with(|c| *c.borrow_mut() = Weak::new());
         let tm = self.thread_mgr.borrow_mut().take();
+        let button = self.button.borrow_mut().take();
         if let Some(tm) = tm {
             let id = self.client_id.get();
+            if let (Some(button), Ok(items)) = (button, tm.cast::<ITfLangBarItemMgr>()) {
+                // SAFETY: removing the item added in ActivateEx.
+                let _ = unsafe { items.RemoveItem(&button) };
+            }
             if let Ok(keys) = tm.cast::<ITfKeystrokeMgr>() {
                 let toggle = toggle_key();
                 // SAFETY: plain COM calls; failures just mean it was not registered.
@@ -518,7 +494,7 @@ impl ITfTextInputProcessorEx_Impl for TextService_Impl {
             let state = &self.state;
             state.client_id.set(tid);
             *state.thread_mgr.borrow_mut() = Some(tm.clone());
-            state.engine.borrow_mut().set_config(load_config());
+            state.engine.borrow_mut().set_config(settings::config());
             CURRENT.with(|c| *c.borrow_mut() = Rc::downgrade(state));
             // SAFETY: a hook for this thread only, removed in `deactivate`.
             let hook = unsafe {
@@ -544,8 +520,19 @@ impl ITfTextInputProcessorEx_Impl for TextService_Impl {
             // SAFETY: plain COM call with live interfaces.
             let cookie = unsafe { source.AdviseSink(&ITfThreadMgrEventSink::IID, &thread_sink)? };
             state.thread_sink_cookie.set(Some(cookie));
-            // Vietnamese on when bikey is selected.
+            // bikey's own on/off is the saved setting; this just says the keyboard is open.
             tsf::set_compartment_i32(&tm, &GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, tid, 1)?;
+
+            let weak = Rc::downgrade(state);
+            let button = ModeButton::create(Rc::new(move || {
+                if let Some(state) = weak.upgrade() {
+                    state.forget_word();
+                }
+            }));
+            let items: ITfLangBarItemMgr = tm.cast()?;
+            // SAFETY: plain COM call; removed in `deactivate`.
+            unsafe { items.AddItem(&button)? };
+            *state.button.borrow_mut() = Some(button);
             Ok(())
         });
         if activated.is_err() {
@@ -604,17 +591,9 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
             if rguid.is_null() || unsafe { *rguid } != GUID_TOGGLE_KEY {
                 return Ok(false.into());
             }
-            let state = &self.state;
-            state.forget_word();
-            let tm = state.thread_mgr.borrow().clone();
-            if let Some(tm) = tm {
-                let on = state.enabled();
-                tsf::set_compartment_i32(
-                    &tm,
-                    &GUID_COMPARTMENT_KEYBOARD_OPENCLOSE,
-                    state.client_id.get(),
-                    i32::from(!on),
-                )?;
+            let button = self.state.button.borrow().clone();
+            if let Some(button) = button {
+                langbar::toggle(&button)?;
             }
             Ok(true.into())
         })

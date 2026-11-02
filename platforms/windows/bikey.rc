@@ -1,0 +1,3 @@
+// Icon order matters: Windows shows the first icon for the input method.
+1 ICON "res/vi.ico"
+2 ICON "res/en.ico"

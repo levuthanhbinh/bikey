@@ -1,7 +1,9 @@
 //! End-to-end check of the *installed* bikey text service (run
 //! `scripts/dev-install.ps1` first).
 //!
-//! Usage: `tsf-smoke [edit|richedit|richedit-tsf|password|vni]` (default `edit`).
+//! Usage: `tsf-smoke [edit|richedit|richedit-tsf|password|vni|menu]` (default `edit`).
+//! `menu` drives the input-mode button's real commands and changes
+//! `HKCU\Software\bikey`, so delete or restore that key afterwards.
 //! `password` checks that bikey leaves a password field alone. `vni` uses an
 //! `EDIT` control and expects `HKCU\Software\bikey\Method` = 1.
 //!
@@ -358,9 +360,82 @@ mod win {
         Ok(())
     }
 
+    /// Select each menu command on the real button, type, and check the effect.
+    fn run_menu_test(window: HWND, edit: HWND) -> Result<bool> {
+        use bikey::{MENU_OFF, MENU_TELEX, MENU_TONE_MODERN, MENU_TONE_TRADITIONAL, MENU_VNI};
+        use windows::Win32::UI::TextServices::{
+            CLSID_TF_ThreadMgr, GUID_LBI_INPUTMODE, ITfLangBarItemButton, ITfLangBarItemMgr,
+            ITfThreadMgr,
+        };
+        use windows_core::Interface;
+        // SAFETY: plain COM calls on this thread's own TSF objects.
+        let button: ITfLangBarItemButton = unsafe {
+            let tm: ITfThreadMgr =
+                CoCreateInstance(&CLSID_TF_ThreadMgr, None, CLSCTX_INPROC_SERVER)
+                    .map_err(|e| e.to_string())?;
+            let items: ITfLangBarItemMgr = tm.cast().map_err(|e| e.to_string())?;
+            items
+                .GetItem(&GUID_LBI_INPUTMODE)
+                .map_err(|e| format!("input-mode button not found: {e}"))?
+                .cast()
+                .map_err(|e| e.to_string())?
+        };
+        let cases = [
+            (MENU_TELEX, "tieengs ", "tiếng "),
+            (MENU_VNI, "tie6ng1 ", "tiếng "),
+            (MENU_OFF, "tieengs ", "tieengs "),
+            (MENU_TELEX, "hoaf ", "hòa "),
+            (MENU_TONE_MODERN, "hoaf ", "hoà "),
+            (MENU_TONE_TRADITIONAL, "hoaf ", "hòa "),
+        ];
+        let mut ok = true;
+        for (id, keys, want) in cases {
+            // SAFETY: plain COM call; our own control.
+            unsafe {
+                button.OnMenuSelect(id).map_err(|e| e.to_string())?;
+                let _ = SetWindowTextW(edit, w!(""));
+            }
+            pump(Duration::from_millis(50));
+            type_keys(window, edit, keys)?;
+            pump(Duration::from_millis(100));
+            let got = text(edit);
+            let pass = got == want;
+            ok &= pass;
+            println!(
+                "{} menu {id} {keys:<10} -> {got:?}{}",
+                if pass { "ok  " } else { "FAIL" },
+                if pass {
+                    String::new()
+                } else {
+                    format!(" (want {want:?})")
+                }
+            );
+        }
+        // SAFETY: reading the button's label and our own window.
+        unsafe {
+            println!("button text: {:?}", button.GetText().map(|t| t.to_string()));
+            let icon = button.GetIcon();
+            println!("button icon loaded: {}", icon.is_ok());
+            ok &= icon.is_ok();
+            let _ = DestroyWindow(window);
+        }
+        Ok(ok)
+    }
+
+    // A linear test script; splitting it would only hide the order of the steps.
+    #[allow(clippy::too_many_lines)]
     pub fn run() -> Result<bool> {
         let control = std::env::args().nth(1).unwrap_or_else(|| "edit".into());
-        if !["edit", "richedit", "richedit-tsf", "password", "vni"].contains(&control.as_str()) {
+        if ![
+            "edit",
+            "richedit",
+            "richedit-tsf",
+            "password",
+            "vni",
+            "menu",
+        ]
+        .contains(&control.as_str())
+        {
             return Err(format!("unknown control {control:?}"));
         }
         // SAFETY: first COM call on this thread.
@@ -379,6 +454,9 @@ mod win {
             return Err("Windows would not bring the test window to the front".into());
         }
 
+        if control == "menu" {
+            return run_menu_test(window, edit);
+        }
         // SAFETY: trivial Win32 call.
         let layout = unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardLayout(0) };
         println!(

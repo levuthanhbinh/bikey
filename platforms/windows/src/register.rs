@@ -125,7 +125,7 @@ pub fn register() -> Result<()> {
                 LANG_VI_VN,
                 &PROFILE_BIKEY,
                 &wide("bikey"),
-                &[],
+                &wide(&dll),
                 0,
                 // Keep the US layout underneath. The Windows Vietnamese layout
                 // turns the number row into letters, breaking digits and VNI.
