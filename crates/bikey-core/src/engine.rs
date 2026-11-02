@@ -12,6 +12,12 @@ pub const MAX_KEYS: usize = 32;
 /// Cap on user-added English words, so a bad config cannot grow memory without bound.
 pub const MAX_USER_WORDS: usize = 10_000;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Language {
+    Vietnamese,
+    English,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
     pub method: InputMethod,
@@ -52,6 +58,12 @@ pub struct Engine {
     /// Set by Backspace inside a word shown in English, so it does not turn
     /// Vietnamese again (`text` → Backspace shows `tex`, not `tẽ`).
     keep_typed: bool,
+    /// The next word looks like code or an address (`obj.|dir`): keep it as typed.
+    literal_next: bool,
+    /// The last thing typed was a digit outside a word, so `.` is a decimal point.
+    after_digit: bool,
+    /// The language of the last word that showed one; decides ambiguous words.
+    previous: Option<Language>,
     user_words: BTreeSet<String>,
 }
 
@@ -78,6 +90,9 @@ impl Engine {
             config,
             raw: Vec::with_capacity(MAX_KEYS),
             keep_typed: false,
+            literal_next: false,
+            after_digit: false,
+            previous: None,
             user_words: BTreeSet::new(),
         }
     }
@@ -129,7 +144,9 @@ impl Engine {
         }
         let mut out = Output::default();
         if self.raw.len() >= MAX_KEYS {
+            let literal = self.literal_next;
             out.commit = self.commit();
+            self.literal_next = literal;
         }
         self.raw.push(c);
         out.preedit = self.preedit();
@@ -173,10 +190,77 @@ impl Engine {
         text
     }
 
+    /// Finish the current word because `c` was typed, returning the word's final
+    /// text (empty if none). Also call this for a character typed outside a word:
+    /// it decides whether the next word looks like code and stays as typed.
+    ///
+    /// `_` and `@` always mean code or an address, and `_` also restores the word
+    /// before it (`dir_name`). `.`, `/`, `\`, `:`, `-` and digits only count after
+    /// a word that is not Vietnamese (`obj.dir`, but `và/hoặc` and `Hà-Nội` convert).
+    pub fn commit_with(&mut self, c: char) -> String {
+        let typed = self.typed();
+        let mut text = self.render(Mode::Complete);
+        let had_word = !typed.is_empty();
+        let vietnamese = had_word && !self.literal_next && {
+            let word = Word::from_keys(&self.raw, self.config.method);
+            word.is_valid(Mode::Complete) && text == word.render(self.config.tone_style)
+        };
+        let smart = self.config.auto_english;
+        if smart && c == '_' {
+            text.clone_from(&typed);
+        }
+        let code_word = had_word && !vietnamese;
+        if had_word {
+            let word = Word::from_keys(&self.raw, self.config.method);
+            let lower = typed.to_ascii_lowercase();
+            let language = if self.literal_next || c == '_' || word.cancelled() {
+                Some(Language::English)
+            } else if text != typed {
+                Some(Language::Vietnamese)
+            } else if self.listed(&lower)
+                || english::signals_english(&lower)
+                || !word.is_valid(Mode::Complete)
+            {
+                Some(Language::English)
+            } else {
+                // A plain word like `nay` or `to` could be either: look further back.
+                None
+            };
+            self.previous = language.or(self.previous);
+        }
+        self.literal_next = smart
+            && match c {
+                '_' | '@' => true,
+                '.' if !had_word && self.after_digit => false,
+                '.' | '/' | '\\' => !had_word || code_word,
+                ':' | '-' => code_word || (!had_word && self.literal_next),
+                c if c.is_ascii_digit() => code_word || (!had_word && self.literal_next),
+                _ => false,
+            };
+        self.after_digit = !had_word && (c.is_ascii_digit() || (c == '.' && self.after_digit));
+        self.raw.clear();
+        self.keep_typed = false;
+        text
+    }
+
+    /// Forget what came before (Enter, arrows, Backspace): whether the next word
+    /// looks like code, and the language of the previous word.
+    pub fn clear_context(&mut self) {
+        self.literal_next = false;
+        self.after_digit = false;
+        self.previous = None;
+    }
+
+    /// The user asked for the exact keys back, so the text is English from here.
+    pub fn mark_previous_english(&mut self) {
+        self.previous = Some(Language::English);
+    }
+
     /// Drop the current word without inserting anything (e.g. Escape).
     pub fn reset(&mut self) {
         self.raw.clear();
         self.keep_typed = false;
+        self.clear_context();
     }
 
     /// The exact keys of the current word, to put them back if the user asks.
@@ -189,9 +273,25 @@ impl Engine {
         self.render(Mode::Prefix)
     }
 
+    /// Whether this lowercase word stays English. Ambiguous words follow the
+    /// previous word's language, and otherwise use the built-in list.
+    fn listed(&self, lower: &str) -> bool {
+        if self.user_words.contains(lower) {
+            return true;
+        }
+        if !self.config.english_exceptions {
+            return false;
+        }
+        match self.previous {
+            Some(Language::Vietnamese) if english::is_ambiguous(lower) => false,
+            Some(Language::English) if english::is_ambiguous(lower) => true,
+            _ => english::contains(lower),
+        }
+    }
+
     fn render(&self, mode: Mode) -> String {
         let raw: String = self.raw.iter().collect();
-        if self.keep_typed {
+        if self.keep_typed || self.literal_next {
             return raw;
         }
         let word = Word::from_keys(&self.raw, self.config.method);
@@ -200,9 +300,7 @@ impl Engine {
             return vietnamese;
         }
         let lower = raw.to_ascii_lowercase();
-        let listed = (self.config.english_exceptions && english::contains(&lower))
-            || self.user_words.contains(&lower);
-        if listed {
+        if self.listed(&lower) {
             raw
         } else if word.cancelled() || word.is_valid(mode) {
             vietnamese

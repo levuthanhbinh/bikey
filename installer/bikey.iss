@@ -34,15 +34,26 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 
+[Tasks]
+Name: "defaultkeyboard"; Description: "Make bikey my default keyboard (it stays on after a restart)"
+
 [Files]
+Source: "default-keyboard.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\target\release\bikey.dll"; DestDir: "{app}\x64"; Flags: ignoreversion regserver 64bit uninsrestartdelete
 Source: "..\target\i686-pc-windows-msvc\release\bikey.dll"; DestDir: "{app}\x86"; Flags: ignoreversion regserver 32bit uninsrestartdelete
 Source: "..\LICENSE-MIT"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE-APACHE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme
 
+[Run]
+; Keyboard settings are per-user, so this runs as the person who started setup.
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\default-keyboard.ps1"""; Flags: runasoriginaluser runhidden; Tasks: defaultkeyboard
+
+[UninstallRun]
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\default-keyboard.ps1"" -Remove"; Flags: runhidden; RunOnceId: "RemoveKeyboard"
+
 [Messages]
-FinishedLabel=bikey is installed.%n%n1. Turn off UniKey, EVKey or OpenKey: running one with bikey scrambles text.%n2. Fully quit and reopen apps that were already running.%n3. Press Win+Space and choose bikey.%n%nTắt UniKey, EVKey hoặc OpenKey, mở lại các ứng dụng đang chạy, rồi nhấn Win+Space và chọn bikey.
+FinishedLabel=bikey is installed.%n%n1. Turn off UniKey, EVKey or OpenKey, including at startup: running one with bikey scrambles text.%n2. Fully quit and reopen apps that were already running.%n3. If bikey is not selected, press Win+Space and choose it.%n%nTắt UniKey, EVKey hoặc OpenKey, mở lại các ứng dụng đang chạy. Nếu bikey chưa được chọn, nhấn Win+Space và chọn bikey.
 
 [Code]
 // A DLL in use by running apps cannot be replaced, but it can be renamed. They

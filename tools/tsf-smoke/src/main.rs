@@ -49,7 +49,8 @@ mod win {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         GetFocus, HKL, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
         KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, MapVirtualKeyW, SendInput, SetFocus, VIRTUAL_KEY,
-        VK_BACK, VK_ESCAPE, VK_LEFT, VK_OEM_PERIOD, VK_RETURN, VK_SHIFT, VK_SPACE,
+        VK_BACK, VK_ESCAPE, VK_LEFT, VK_OEM_2, VK_OEM_MINUS, VK_OEM_PERIOD, VK_RETURN, VK_SHIFT,
+        VK_SPACE,
     };
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         INPUT_MOUSE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEINPUT,
@@ -93,6 +94,16 @@ mod win {
         ("cos b\u{1b}", "có b"),
         ("class \u{1b}", "class "),
         ("hoaf.", "hòa."),
+        ("hoaf! ", "hòa! "),
+        ("taats car ", "tất cả "),
+        ("this car ", "this car "),
+        ("car ", "cả "),
+        ("obj.dir ", "obj.dir "),
+        ("dir_name ", "dir_name "),
+        ("src/dir ", "src/dir "),
+        ("user@gmail.cos ", "user@gmail.cos "),
+        ("vaf/hoawcj ", "và/hoặc "),
+        ("obj.dir hoaf ", "obj.dir hòa "),
         ("hoaf2", "hòa2"),
         ("Vieetj\n", "Việt\r\n"),
         ("ddi\u{2190}b ", "đb i"),
@@ -201,6 +212,10 @@ mod win {
                 '\u{2190}' => (VK_LEFT, false),
                 '\u{1b}' => (VK_ESCAPE, false),
                 '.' => (VK_OEM_PERIOD, false),
+                '/' => (VK_OEM_2, false),
+                '_' => (VK_OEM_MINUS, true),
+                '@' => (VIRTUAL_KEY(u16::from(b'2')), true),
+                '!' => (VIRTUAL_KEY(u16::from(b'1')), true),
                 c if c.is_ascii_digit() => (VIRTUAL_KEY(u16::from(c as u8)), false),
                 c if c.is_ascii_alphabetic() => (
                     VIRTUAL_KEY(u16::from(c.to_ascii_uppercase() as u8)),
@@ -480,6 +495,8 @@ mod win {
             // SAFETY: our own control.
             let _ = unsafe { SetWindowTextW(edit, w!("")) };
             pump(Duration::from_millis(50));
+            // An arrow key clears what bikey remembers from the previous case.
+            type_keys(window, edit, "\u{2190}")?;
             type_keys(window, edit, keys)?;
             pump(Duration::from_millis(100));
             let got = text(edit);

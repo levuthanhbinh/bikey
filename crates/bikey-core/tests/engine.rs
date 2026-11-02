@@ -221,6 +221,127 @@ fn long_input_is_committed_in_chunks() {
     assert_eq!(committed, "b".repeat(MAX_KEYS * 2 + 5));
 }
 
+/// Type a line the way the Windows service feeds the engine: word keys go in, and
+/// any other character ends the word through `commit_with`.
+fn type_line(keys: &str) -> String {
+    let mut e = Engine::default();
+    let mut out = String::new();
+    for c in keys.chars() {
+        if let Some(o) = e.key(c) {
+            out.push_str(&o.commit);
+        } else {
+            out.push_str(&e.commit_with(c));
+            out.push(c);
+        }
+    }
+    out.push_str(&e.commit());
+    out
+}
+
+#[test]
+fn code_stays_as_typed() {
+    for line in [
+        "obj.dir",
+        "dir_name",
+        "my_var.dir",
+        "src/dir",
+        "user@gmail.cos",
+        "./dir",
+        "_dir",
+        "www.tax.com",
+        "v2.dir",
+        "well-known",
+    ] {
+        assert_eq!(type_line(line), line);
+    }
+}
+
+#[test]
+fn vietnamese_around_the_same_characters_still_converts() {
+    let cases = [
+        ("vaf/hoawcj", "và/hoặc"),
+        ("Haf-Nooij", "Hà-Nội"),
+        ("hoaf.tooi", "hòa.tôi"),
+        ("hoaf. tooi", "hòa. tôi"),
+        ("3.5 hoaf", "3.5 hòa"),
+        ("1.hoaf", "1.hòa"),
+        ("gias: hoaf", "giá: hòa"),
+    ];
+    for (keys, want) in cases {
+        assert_eq!(type_line(keys), want, "{keys}");
+    }
+}
+
+#[test]
+fn ambiguous_words_follow_the_previous_word() {
+    let cases = [
+        // After Vietnamese, the Vietnamese reading.
+        ("taats car", "tất cả"),
+        ("tooi teen", "tôi tên"),
+        ("tooi been", "tôi bên"),
+        ("hoaf, been", "hòa, bên"),
+        // After English, the English word.
+        ("this car", "this car"),
+        ("hello teen", "hello teen"),
+        ("hello, cos", "hello, cos"),
+        ("the car", "the car"),
+        ("my teen", "my teen"),
+        // Plain words that could be either: look further back.
+        ("taats nay car", "tất nay cả"),
+        ("this to car", "this to car"),
+        // No previous word: the built-in choice.
+        ("car", "cả"),
+        ("been", "been"),
+        ("nay car", "nay cả"),
+        // Not ambiguous, so the previous word changes nothing.
+        ("tooi these", "tôi these"),
+        ("hello hoaf", "hello hòa"),
+        // A cancelled mark counts as English.
+        ("carr teen", "car teen"),
+    ];
+    for (keys, want) in cases {
+        assert_eq!(type_line(keys), want, "{keys}");
+    }
+}
+
+#[test]
+fn previous_word_is_forgotten_when_context_is_cleared() {
+    let mut e = Engine::default();
+    for c in "hello".chars() {
+        e.key(c);
+    }
+    e.commit_with(' ');
+    e.clear_context();
+    assert_eq!(type_word(&mut e, "car"), "cả");
+}
+
+#[test]
+fn asking_for_the_exact_keys_makes_the_text_english() {
+    let mut e = Engine::default();
+    e.mark_previous_english();
+    for c in "car".chars() {
+        e.key(c);
+    }
+    assert_eq!(e.preedit(), "car");
+}
+
+#[test]
+fn code_context_ends_at_a_space() {
+    assert_eq!(type_line("obj.dir hoaf"), "obj.dir hòa");
+    assert_eq!(type_line("user@gmail tooi"), "user@gmail tôi");
+}
+
+#[test]
+fn code_context_can_be_cleared() {
+    let mut e = Engine::default();
+    assert_eq!(e.commit_with('_'), "");
+    e.clear_context();
+    assert_eq!(type_word(&mut e, "dir"), "dỉ");
+    e.commit_with('_');
+    e.reset();
+    assert_eq!(type_word(&mut e, "dir"), "dỉ");
+}
+
 #[test]
 fn typed_returns_the_exact_keys() {
     let mut e = Engine::default();

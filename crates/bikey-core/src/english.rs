@@ -4,19 +4,40 @@
 use std::sync::OnceLock;
 
 const LIST: &str = include_str!("english.txt");
+const AMBIGUOUS: &str = include_str!("ambiguous.txt");
+
+/// Plain words that are not converted but mark the text as English.
+const ENGLISH_SIGNALS: [&str; 4] = ["a", "he", "my", "the"];
+
+fn parse(list: &'static str) -> Vec<&'static str> {
+    let mut words: Vec<&str> = list
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .collect();
+    words.sort_unstable();
+    words.dedup();
+    words
+}
 
 fn words() -> &'static [&'static str] {
     static WORDS: OnceLock<Vec<&'static str>> = OnceLock::new();
-    WORDS.get_or_init(|| {
-        let mut words: Vec<&str> = LIST
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            .collect();
-        words.sort_unstable();
-        words.dedup();
-        words
-    })
+    WORDS.get_or_init(|| parse(LIST))
+}
+
+fn ambiguous_words() -> &'static [&'static str] {
+    static WORDS: OnceLock<Vec<&'static str>> = OnceLock::new();
+    WORDS.get_or_init(|| parse(AMBIGUOUS))
+}
+
+/// `word` must already be ASCII-lowercased.
+pub(crate) fn is_ambiguous(word: &str) -> bool {
+    ambiguous_words().binary_search(&word).is_ok()
+}
+
+/// `word` must already be ASCII-lowercased.
+pub(crate) fn signals_english(word: &str) -> bool {
+    ENGLISH_SIGNALS.contains(&word)
 }
 
 /// `word` must already be ASCII-lowercased.
@@ -28,7 +49,7 @@ pub(crate) fn contains(word: &str) -> bool {
 mod tests {
     #[test]
     fn list_is_clean() {
-        for w in super::words() {
+        for w in super::words().iter().chain(super::ambiguous_words()) {
             assert!(
                 !w.is_empty()
                     && w.len() <= crate::MAX_KEYS

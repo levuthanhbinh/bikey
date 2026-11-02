@@ -9,7 +9,9 @@ little as possible for as short a time as possible.
   reports or the clipboard. The engine only holds the word currently being
   composed (at most 32 keys) and clears it on commit, reset and focus change. On
   Windows the word just finished is kept in memory only until the next key,
-  click or focus change, so that Esc can put back what was typed.
+  click or focus change, so that Esc can put back what was typed. Between words
+  it remembers only whether the last word was Vietnamese or English, never the
+  word itself.
 - **No network access.** bikey contains no networking code: no telemetry,
   analytics or auto-update. New versions come only from signed GitHub releases.
 - **Password fields are left alone.** bikey stands aside when the OS marks a

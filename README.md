@@ -13,7 +13,8 @@ rights), then:
 1. Turn off UniKey, EVKey or OpenKey if you use them.
 2. Fully quit and reopen apps that were already running. Closing a window is
    often not enough: quit Zalo from its tray icon.
-3. Press **Win+Space** and choose **bikey**.
+3. If bikey is not selected, press **Win+Space** and choose it. The installer's
+   "default keyboard" option, on by default, keeps it on after a restart.
 
 A button near the clock shows **V** (Vietnamese) or **E** (English). Click it or
 press **Alt+Z** to switch; its menu picks Telex, VNI and tone style. If a word
@@ -28,6 +29,10 @@ The installer is not code-signed yet, so Windows may show a warning.
 - **Telex** (default) and **VNI**
 - **Smart English detection:** `text`, `class` and `these` stay English, while
   `tieengs` becomes `tiếng`
+- Reads ambiguous words from context: `taats car` gives `tất cả`, `this car` stays
+  `this car`
+- Leaves code and addresses alone: `obj.dir`, `dir_name` and `user@gmail.com` stay
+  as typed, while `và/hoặc` and `Hà-Nội` still convert
 - Traditional (`hòa`) or modern (`hoà`) tone placement
 - A proper Windows input method (TSF) with no global keyboard hook
 - No network access and no keystroke logging. See [SECURITY.md](SECURITY.md).

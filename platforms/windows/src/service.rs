@@ -194,17 +194,43 @@ fn us_key(vk: u32, shift: bool) -> Option<char> {
     Some(if shift { shifted } else { plain })
 }
 
+/// Whether Shift counts as held for the key being handled. The Shift entries in
+/// the key state can miss it while Windows' own translation still sees it, so ask
+/// that too: would the A key type a capital, allowing for Caps Lock?
+fn shift_held(keys: &[u8; 256]) -> bool {
+    const VK_A: u32 = 0x41;
+    const SCAN_A: u32 = 0x1E;
+    let held = |vk: VIRTUAL_KEY| keys[usize::from(vk.0)] & 0x80 != 0;
+    if held(VK_SHIFT) || held(VK_LSHIFT) || held(VK_RSHIFT) {
+        return true;
+    }
+    let mut buf = [0u16; 4];
+    // SAFETY: valid buffers; flag 0x4 leaves the keyboard (dead-key) state untouched.
+    let n = unsafe {
+        ToUnicodeEx(
+            VK_A,
+            SCAN_A,
+            keys,
+            &mut buf,
+            0x4,
+            Some(GetKeyboardLayout(0)),
+        )
+    };
+    let capital = n == 1 && buf[0] == u16::from(b'A');
+    let caps_lock = keys[usize::from(VK_CAPITAL.0)] & 1 != 0;
+    capital != caps_lock
+}
+
 /// The character this key produces with the current layout and modifiers,
 /// without disturbing dead-key state.
 fn key_char(vk: u32, lparam: LPARAM) -> Option<char> {
     let mut keys = [0u8; 256];
     // SAFETY: valid 256-byte buffer.
     unsafe { GetKeyboardState(&mut keys) }.ok()?;
-    if vietnamese_layout() {
-        let shift = keys[usize::from(VK_SHIFT.0)] & 0x80 != 0;
-        if let Some(c) = us_key(vk, shift) {
-            return Some(c);
-        }
+    if vietnamese_layout()
+        && let Some(c) = us_key(vk, shift_held(&keys))
+    {
+        return Some(c);
     }
     let scan = u32::try_from((lparam.0 >> 16) & 0xff).ok()?;
     let mut buf = [0u16; 4];
@@ -311,6 +337,10 @@ impl State {
     /// Forget the word, leaving whatever is on screen untouched.
     fn forget_word(&self) {
         self.engine.borrow_mut().reset();
+        self.clear_tracking();
+    }
+
+    fn clear_tracking(&self) {
         self.shown.borrow_mut().clear();
         self.finished.borrow_mut().take();
         self.span.set(None);
@@ -339,6 +369,7 @@ impl State {
         };
         let done = send(&inputs);
         self.forget_word();
+        self.engine.borrow_mut().mark_previous_english();
         done
     }
 
@@ -396,6 +427,7 @@ impl State {
             Action::Restore
         } else if vk == VK_BACK.0 {
             if !in_word {
+                self.engine.borrow_mut().clear_context();
                 return Action::Ignore;
             }
             Action::Backspace
@@ -408,7 +440,15 @@ impl State {
                     Action::CommitWith(c)
                 }
                 _ if in_word => Action::Commit,
-                _ => return Action::Ignore,
+                // Not ours, but it decides whether the next word looks like code.
+                Some(c) if !c.is_control() => {
+                    self.engine.borrow_mut().commit_with(c);
+                    return Action::Ignore;
+                }
+                _ => {
+                    self.engine.borrow_mut().clear_context();
+                    return Action::Ignore;
+                }
             }
         };
         // Only now pay for the field checks, and only for keys we would take.
@@ -471,11 +511,14 @@ impl State {
     /// Finish the word with its final text (English fix-ups happen here), plus `c`.
     fn commit(&self, c: Option<char>) -> bool {
         let typed = self.engine.borrow().typed();
-        let word = self.engine.borrow_mut().commit();
+        let word = match c {
+            Some(c) => self.engine.borrow_mut().commit_with(c),
+            None => self.engine.borrow_mut().commit(),
+        };
         let text: String = word.chars().chain(c).collect();
         let done = self.type_word(&text);
         let span = self.span.get();
-        self.forget_word();
+        self.clear_tracking();
         if let (true, Some(ended_by)) = (done && !typed.is_empty() && word != typed, c) {
             // The caret check keeps guarding this word until the chance to restore ends.
             let length = i32::try_from(text.encode_utf16().count()).unwrap_or(0);
