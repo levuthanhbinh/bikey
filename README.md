@@ -1,18 +1,33 @@
 # bikey
 
-A Vietnamese input method (bộ gõ tiếng Việt) for Windows, macOS and Linux that
-recognises English as you type, so you never need to switch modes.
+A Vietnamese input method (bộ gõ tiếng Việt) for Windows that recognises
+English as you type, so you never need to switch modes.
 
-> **Status:** early development, not usable yet.
+> **Status:** early development, Windows only for now.
 
-## Features (planned)
+## Install on Windows
+
+Run `bikey-setup-<version>.exe` (Windows 10/11, 64-bit, needs administrator
+rights), then:
+
+1. Turn off UniKey, EVKey or OpenKey if you use them.
+2. Fully quit and reopen apps that were already running. Closing a window is
+   often not enough: quit Zalo from its tray icon.
+3. Press **Win+Space** and choose **bikey**.
+
+A button near the clock shows **V** (Vietnamese) or **E** (English). Click it or
+press **Alt+Z** to switch; its menu picks Telex, VNI and tone style. Remove bikey
+from Settings → Apps. Files still in use are deleted at the next restart.
+
+The installer is not code-signed yet, so Windows may show a warning.
+
+## Features
 
 - **Telex** (default) and **VNI**
 - **Smart English detection:** `text`, `class` and `these` stay English, while
   `tieengs` becomes `tiếng`
 - Traditional (`hòa`) or modern (`hoà`) tone placement
-- Uses each OS's official input-method framework (TSF, InputMethodKit, Fcitx5):
-  no global keyboard hooks, no Accessibility permission, works on Wayland
+- A proper Windows input method (TSF) with no global keyboard hook
 - No network access and no keystroke logging. See [SECURITY.md](SECURITY.md).
 
 **Use one Vietnamese typing tool at a time.** Hook-based tools such as UniKey,
@@ -21,19 +36,18 @@ scrambles text. Turn it off (or switch it to English) while bikey is selected.
 
 ## Tiếng Việt
 
-bikey là bộ gõ tiếng Việt cho Windows, macOS và Linux. Bộ gõ tự nhận ra khi bạn
-gõ tiếng Anh nên không cần bật/tắt chế độ. Hỗ trợ **Telex** (mặc định) và
-**VNI**, dùng framework bộ gõ chính thức của từng hệ điều hành, không theo dõi
-bàn phím toàn hệ thống và không kết nối mạng.
+bikey là bộ gõ tiếng Việt cho Windows. Bộ gõ tự nhận ra khi bạn gõ tiếng Anh nên
+không cần bật/tắt chế độ. Hỗ trợ **Telex** (mặc định) và **VNI**, dùng framework
+bộ gõ chính thức của Windows, không theo dõi bàn phím toàn hệ thống và không kết
+nối mạng.
 
 ## Layout
 
 ```
 crates/bikey-core   platform-independent engine (Rust, no unsafe)
-crates/bikey-ffi    C ABI for the platform shims          (planned)
-platforms/windows   TSF text service                      (planned)
-platforms/macos     InputMethodKit app                    (planned)
-platforms/linux-*   Fcitx5 addon                          (planned)
+crates/bikey-ffi    C ABI, kept for possible other platforms
+platforms/windows   TSF text service
+installer/          Windows installer (Inno Setup)
 ```
 
 ## Building

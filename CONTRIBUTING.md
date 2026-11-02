@@ -7,6 +7,18 @@
 - Windows: Visual Studio 2022 Build Tools with the **Desktop development with
   C++** workload (for the MSVC linker).
 
+## Windows installer
+
+With [Inno Setup](https://jrsoftware.org/isinfo.php) 7 installed and
+`rustup target add i686-pc-windows-msvc`:
+
+```powershell
+$env:INNO_ISCC = 'C:\path\to\ISCC.exe'
+scripts\build-installer.ps1
+```
+
+`scripts\dev-install.ps1` installs a local build without the installer.
+
 ## Before opening a PR
 
 ```sh

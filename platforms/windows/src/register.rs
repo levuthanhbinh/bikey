@@ -168,6 +168,12 @@ pub fn unregister() -> Result<()> {
         }
         Ok(())
     });
+    // The calls above can leave empty keys behind, so remove TSF's record of bikey too.
+    let tip = HSTRING::from(format!(
+        "SOFTWARE\\Microsoft\\CTF\\TIP\\{{{CLSID_BIKEY:?}}}"
+    ));
+    // SAFETY: deleting our own subtree; it may already be gone.
+    let _ = unsafe { RegDeleteTreeW(HKEY_LOCAL_MACHINE, &tip) };
     let path = HSTRING::from(clsid_key());
     // SAFETY: deleting our own CLSID subtree.
     let status = unsafe { RegDeleteTreeW(HKEY_LOCAL_MACHINE, &path) };
