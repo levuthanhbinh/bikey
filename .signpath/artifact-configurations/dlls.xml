@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SignPath artifact configuration "dlls". Paste into the SignPath project.
+     The release workflow uploads dist/dlls, which GitHub zips. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="x64/bikey.dll">
+      <authenticode-sign/>
+    </pe-file>
+    <pe-file path="x86/bikey.dll">
+      <authenticode-sign/>
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

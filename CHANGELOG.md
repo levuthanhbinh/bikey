@@ -6,6 +6,10 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-07
+
+First release, for Windows 10/11 (64-bit).
+
 ### Added
 - `bikey-core` engine: Telex (default) and VNI, marks typeable anywhere in a
   word, traditional/modern tone placement, syllable validation, smart English
@@ -34,3 +38,9 @@ All notable changes are documented here. The format follows
   cargo-fuzz target run in CI.
 - Cargo workspace, pinned toolchain, CI (Windows/macOS/Linux), cargo-deny,
   Dependabot, security policy.
+- Release workflow: builds the installer on GitHub Actions, publishes it with a
+  SHA-256 checksum and a build provenance attestation, and is ready for code
+  signing through SignPath. Version information on the DLL and the installer.
+
+[Unreleased]: https://github.com/levuthanhbinh/bikey/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/levuthanhbinh/bikey/releases/tag/v0.1.0

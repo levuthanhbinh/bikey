@@ -9,8 +9,9 @@ English as you type, so you never need to switch modes.
 
 ## Install on Windows
 
-Run `bikey-setup-<version>.exe` (Windows 10/11, 64-bit, needs administrator
-rights), then:
+Download `bikey-setup-<version>.exe` from the
+[latest release](https://github.com/levuthanhbinh/bikey/releases/latest) and run
+it (Windows 10/11, 64-bit, needs administrator rights), then:
 
 1. Turn off UniKey, EVKey or OpenKey if you use them.
 2. Fully quit and reopen apps that were already running. Closing a window is
@@ -24,7 +25,17 @@ converts by mistake (`cos` to `có`), press **Esc** while typing it or right aft
 it to get your exact keys back. Remove bikey
 from Settings → Apps. Files still in use are deleted at the next restart.
 
-The installer is not code-signed yet, so Windows may show a warning.
+The installer is not code-signed yet, so Windows may show a warning: choose
+**More info → Run anyway**. To check that a download is genuine, compare its
+SHA-256 with `SHA256SUMS.txt` from the same release:
+
+```powershell
+Get-FileHash .\bikey-setup-0.1.0.exe -Algorithm SHA256
+```
+
+With the [GitHub CLI](https://cli.github.com) you can also confirm it was built by
+this repository's release workflow:
+`gh attestation verify bikey-setup-0.1.0.exe --repo levuthanhbinh/bikey`.
 
 ## Features
 

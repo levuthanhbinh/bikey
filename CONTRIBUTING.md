@@ -19,6 +19,8 @@ scripts\build-installer.ps1
 
 `scripts\dev-install.ps1` installs a local build without the installer.
 
+To publish a release, see [RELEASING.md](RELEASING.md).
+
 ## Before opening a PR
 
 ```sh

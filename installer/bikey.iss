@@ -7,11 +7,25 @@
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
+; The release workflow passes code-signed copies of the DLLs here.
+#ifndef X64Dll
+  #define X64Dll "..\target\release\bikey.dll"
+#endif
+#ifndef X86Dll
+  #define X86Dll "..\target\i686-pc-windows-msvc\release\bikey.dll"
+#endif
 
 [Setup]
 AppId={{B7E0C3A2-5D41-4F6E-9A87-3C2D1E0F4B65}
 AppName=bikey
 AppVersion={#AppVersion}
+; Code signing (SignPath) checks the product name and version of the setup file.
+VersionInfoVersion={#AppVersion}
+VersionInfoProductName=bikey
+VersionInfoProductVersion={#AppVersion}
+VersionInfoProductTextVersion={#AppVersion}
+VersionInfoDescription=bikey Setup
+VersionInfoCompany=Bryan Le
 AppPublisher=Bryan Le
 AppPublisherURL=https://github.com/levuthanhbinh/bikey
 AppSupportURL=https://github.com/levuthanhbinh/bikey/issues
@@ -40,8 +54,8 @@ Name: "defaultkeyboard"; Description: "Make bikey my default keyboard (it stays 
 
 [Files]
 Source: "default-keyboard.ps1"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\target\release\bikey.dll"; DestDir: "{app}\x64"; Flags: ignoreversion regserver 64bit uninsrestartdelete
-Source: "..\target\i686-pc-windows-msvc\release\bikey.dll"; DestDir: "{app}\x86"; Flags: ignoreversion regserver 32bit uninsrestartdelete
+Source: "{#X64Dll}"; DestDir: "{app}\x64"; Flags: ignoreversion regserver 64bit uninsrestartdelete
+Source: "{#X86Dll}"; DestDir: "{app}\x86"; Flags: ignoreversion regserver 32bit uninsrestartdelete
 Source: "..\LICENSE-MIT"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE-APACHE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme

@@ -13,7 +13,8 @@ little as possible for as short a time as possible.
   it remembers only whether the last word was Vietnamese or English, never the
   word itself.
 - **No network access.** bikey contains no networking code: no telemetry,
-  analytics or auto-update. New versions come only from signed GitHub releases.
+  analytics or auto-update. New versions come only from
+  [GitHub Releases](https://github.com/levuthanhbinh/bikey/releases).
 - **Password fields are left alone.** bikey stands aside when the OS marks a
   field as secure (Windows TSF password input scope, macOS secure input, Fcitx5
   `Password`/`Sensitive` capabilities).
@@ -29,6 +30,21 @@ little as possible for as short a time as possible.
 - **Memory safety.** The engine is written in Rust with
   `#![forbid(unsafe_code)]`. Any `unsafe` code is confined to the FFI and
   platform crates, and each block has a `// SAFETY:` comment.
+
+## Release builds
+
+Releases are built by GitHub Actions from the tagged source, never on a
+personal machine (`.github/workflows/release.yml`). Each one comes with a
+SHA-256 checksum (`SHA256SUMS.txt`) and a
+[build provenance attestation](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations)
+that ties the installer to the commit and workflow that built it:
+
+```sh
+gh attestation verify bikey-setup-<version>.exe --repo levuthanhbinh/bikey
+```
+
+Authenticode code signing through SignPath is being set up. Until it is in
+place, the installer and DLLs are unsigned.
 
 ## Supported versions
 
