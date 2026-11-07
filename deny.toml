@@ -14,6 +14,8 @@ confidence-threshold = 0.9
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Workspace crates depend on bikey-core by path; all of them have publish = false.
+allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"
