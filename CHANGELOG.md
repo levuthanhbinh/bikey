@@ -6,6 +6,14 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-07
+
+### Fixed
+- Vietnamese typing did nothing in Chromium-based apps such as Zalo, Chrome and
+  Edge. These apps close the Windows "keyboard open" switch in ordinary text
+  fields, and bikey took that as being turned off. bikey's own V/E setting now
+  decides on its own; password and other non-text fields are still left alone.
+
 ## [0.1.0] - 2026-11-07
 
 First release, for Windows 10/11 (64-bit).
@@ -42,5 +50,6 @@ First release, for Windows 10/11 (64-bit).
   SHA-256 checksum and a build provenance attestation, and is ready for code
   signing through SignPath. Version information on the DLL and the installer.
 
-[Unreleased]: https://github.com/levuthanhbinh/bikey/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/levuthanhbinh/bikey/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/levuthanhbinh/bikey/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/levuthanhbinh/bikey/releases/tag/v0.1.0

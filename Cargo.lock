@@ -4,18 +4,18 @@ version = 4
 
 [[package]]
 name = "bikey-core"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "bikey-ffi"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bikey-core",
 ]
 
 [[package]]
 name = "bikey-tsf"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bikey-core",
  "embed-resource",
@@ -67,7 +67,7 @@ checksum = "1c66915cc5391097de7a2b0b972e8505aa33c0df401fd3a6811dbdb32881ba48"
 
 [[package]]
 name = "gen-dict"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bikey-core",
 ]
@@ -231,7 +231,7 @@ checksum = "06bdbd8cfc056b8d2e2e85f29b56a3bdbecb527cef81eb39e3e7b98af4652770"
 
 [[package]]
 name = "tsf-smoke"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bikey-tsf",
  "windows",

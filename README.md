@@ -30,12 +30,12 @@ The installer is not code-signed yet, so Windows may show a warning: choose
 SHA-256 with `SHA256SUMS.txt` from the same release:
 
 ```powershell
-Get-FileHash .\bikey-setup-0.1.0.exe -Algorithm SHA256
+Get-FileHash .\bikey-setup-0.1.1.exe -Algorithm SHA256
 ```
 
 With the [GitHub CLI](https://cli.github.com) you can also confirm it was built by
 this repository's release workflow:
-`gh attestation verify bikey-setup-0.1.0.exe --repo levuthanhbinh/bikey`.
+`gh attestation verify bikey-setup-0.1.1.exe --repo levuthanhbinh/bikey`.
 
 ## Features
 

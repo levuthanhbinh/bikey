@@ -373,12 +373,12 @@ impl State {
         done
     }
 
+    /// On or off is the saved setting alone (the V/E button and Alt+Z). The TSF
+    /// keyboard open/close compartment is not consulted: Chromium-based apps
+    /// (Chrome, Edge, Zalo) close it in ordinary text fields. Fields bikey must
+    /// stay out of are caught by `tsf::is_secure_field`.
     fn enabled(&self) -> bool {
-        let tm = self.thread_mgr.borrow();
-        settings::enabled()
-            && tm.as_ref().is_some_and(|tm| {
-                tsf::compartment_i32(tm, &GUID_COMPARTMENT_KEYBOARD_OPENCLOSE) != Some(0)
-            })
+        self.thread_mgr.borrow().is_some() && settings::enabled()
     }
 
     /// If the caret has left the word (a mouse click, say), the word is over.
